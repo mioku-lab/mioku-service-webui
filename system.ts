@@ -48,6 +48,68 @@ interface MiokiRuntimeConfig {
 
 const SYSTEM_PLUGIN_NAMES = new Set(["boot", "chat", "help"]);
 const SYSTEM_SERVICE_NAMES = new Set(["ai", "config", "help", "screenshot"]);
+const BOOT_CONFIG_PATH = path.join(process.cwd(), "config", "boot", "base.json");
+
+interface AccessRuleConfig {
+  whitelist: Array<string | number>;
+  blacklist: Array<string | number>;
+}
+
+export interface BootSystemConfig {
+  likeCommand: {
+    enabled: boolean;
+    keyword: string;
+    likeTimes: number;
+    reactionEmojiId: number;
+  };
+  friend: {
+    autoApprove: boolean;
+  };
+  group: {
+    minMemberCount: number;
+    welcome: {
+      enabled: boolean;
+      mode: "ai" | "text";
+      text: string;
+      aiPrompt: string;
+    };
+  };
+  messageFilter: {
+    user: AccessRuleConfig;
+    group: AccessRuleConfig;
+  };
+}
+
+const DEFAULT_BOOT_SYSTEM_CONFIG: BootSystemConfig = {
+  likeCommand: {
+    enabled: true,
+    keyword: "赞我",
+    likeTimes: 10,
+    reactionEmojiId: 66,
+  },
+  friend: {
+    autoApprove: false,
+  },
+  group: {
+    minMemberCount: 0,
+    welcome: {
+      enabled: true,
+      mode: "ai",
+      text: "欢迎 {user} 加入 {group}",
+      aiPrompt: "",
+    },
+  },
+  messageFilter: {
+    user: {
+      whitelist: [],
+      blacklist: [],
+    },
+    group: {
+      whitelist: [],
+      blacklist: [],
+    },
+  },
+};
 
 function isContainerRuntime(): boolean {
   return fs.existsSync("/.dockerenv");
@@ -138,6 +200,71 @@ function deepMerge<T extends Record<string, any>>(
   return result;
 }
 
+function cloneJson<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function normalizeAccessRuleConfig(input: any): AccessRuleConfig {
+  return {
+    whitelist: Array.isArray(input?.whitelist) ? input.whitelist : [],
+    blacklist: Array.isArray(input?.blacklist) ? input.blacklist : [],
+  };
+}
+
+function normalizeBootSystemConfig(input: any): BootSystemConfig {
+  const merged = deepMerge(cloneJson(DEFAULT_BOOT_SYSTEM_CONFIG), input || {});
+  const legacyPrivateFilter = input?.messageFilter?.private;
+  const userFilterSource = input?.messageFilter?.user ?? legacyPrivateFilter;
+
+  return {
+    likeCommand: {
+      enabled: Boolean(merged?.likeCommand?.enabled),
+      keyword:
+        typeof merged?.likeCommand?.keyword === "string" &&
+        merged.likeCommand.keyword.trim()
+          ? merged.likeCommand.keyword.trim()
+          : DEFAULT_BOOT_SYSTEM_CONFIG.likeCommand.keyword,
+      likeTimes:
+        typeof merged?.likeCommand?.likeTimes === "number" &&
+        Number.isFinite(merged.likeCommand.likeTimes)
+          ? merged.likeCommand.likeTimes
+          : DEFAULT_BOOT_SYSTEM_CONFIG.likeCommand.likeTimes,
+      reactionEmojiId:
+        typeof merged?.likeCommand?.reactionEmojiId === "number" &&
+        Number.isFinite(merged.likeCommand.reactionEmojiId)
+          ? merged.likeCommand.reactionEmojiId
+          : DEFAULT_BOOT_SYSTEM_CONFIG.likeCommand.reactionEmojiId,
+    },
+    friend: {
+      autoApprove: Boolean(merged?.friend?.autoApprove),
+    },
+    group: {
+      minMemberCount:
+        typeof merged?.group?.minMemberCount === "number" &&
+        Number.isFinite(merged.group.minMemberCount)
+          ? merged.group.minMemberCount
+          : DEFAULT_BOOT_SYSTEM_CONFIG.group.minMemberCount,
+      welcome: {
+        enabled: Boolean(merged?.group?.welcome?.enabled),
+        mode:
+          merged?.group?.welcome?.mode === "text" ? "text" : "ai",
+        text:
+          typeof merged?.group?.welcome?.text === "string"
+            ? merged.group.welcome.text
+            : DEFAULT_BOOT_SYSTEM_CONFIG.group.welcome.text,
+        aiPrompt:
+          typeof merged?.group?.welcome?.aiPrompt === "string"
+            ? merged.group.welcome.aiPrompt
+            : DEFAULT_BOOT_SYSTEM_CONFIG.group.welcome.aiPrompt,
+      },
+    },
+    messageFilter: {
+      user: normalizeAccessRuleConfig(userFilterSource),
+      group: normalizeAccessRuleConfig(merged?.messageFilter?.group),
+    },
+  };
+}
+
 function readPackageJson(dir: string): any {
   const packagePath = path.join(dir, "package.json");
   if (!fs.existsSync(packagePath)) {
@@ -222,6 +349,23 @@ export function updateWebUISettings(
     ),
   };
   writeJsonFile(SETTINGS_PATH, next);
+  return next;
+}
+
+export function getBootSystemConfig(): BootSystemConfig {
+  ensureDir(path.dirname(BOOT_CONFIG_PATH));
+  const raw = readJsonFile<any>(BOOT_CONFIG_PATH, DEFAULT_BOOT_SYSTEM_CONFIG);
+  const normalized = normalizeBootSystemConfig(raw);
+  writeJsonFile(BOOT_CONFIG_PATH, normalized);
+  return normalized;
+}
+
+export function updateBootSystemConfig(
+  input: Partial<BootSystemConfig>,
+): BootSystemConfig {
+  const current = getBootSystemConfig();
+  const next = normalizeBootSystemConfig(deepMerge(current, input || {}));
+  writeJsonFile(BOOT_CONFIG_PATH, next);
   return next;
 }
 
@@ -1724,6 +1868,7 @@ export interface MiokuConfig {
     token: string;
   }>;
   plugins: string[];
+  boot: BootSystemConfig;
 }
 
 export function getMiokuConfig(): MiokuConfig {
@@ -1737,6 +1882,7 @@ export function getMiokuConfig(): MiokuConfig {
     admins: Array.isArray(miokiConfig.admins) ? miokiConfig.admins : [],
     napcat: Array.isArray(miokiConfig.napcat) ? miokiConfig.napcat : [],
     plugins: Array.isArray(miokiConfig.plugins) ? miokiConfig.plugins : [],
+    boot: getBootSystemConfig(),
   };
 }
 
@@ -1747,6 +1893,7 @@ export function updateMiokuConfig(config: Partial<MiokuConfig>): MiokuConfig {
     admins: Array.isArray(config.admins) ? config.admins : current.admins,
     napcat: Array.isArray(config.napcat) ? config.napcat : current.napcat,
     plugins: Array.isArray(config.plugins) ? config.plugins : current.plugins,
+    boot: config.boot ? updateBootSystemConfig(config.boot) : current.boot,
   };
 
   const localConfig = readJsonFile<any>(LOCAL_CONFIG_PATH, { mioki: {} });

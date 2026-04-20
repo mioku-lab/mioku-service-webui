@@ -23,6 +23,7 @@ export function createConfigRoutes() {
       admins: body?.admins?.length,
       napcat: body?.napcat?.length,
       plugins: body?.plugins?.length,
+      bootConfigured: Boolean(body?.boot),
     });
     const data = updateMiokuConfig(body);
     return c.json({ ok: true, data });
