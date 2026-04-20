@@ -207,7 +207,7 @@ const runtime = new WebUIRuntime();
 
 const webUIService: MiokuService = {
   name: "webui",
-  version: "1.7.1",
+  version: "1.8.0",
   description: "Mioku WebUI 管理服务",
   api: {
     getSettings: () => getWebUISettings(),
