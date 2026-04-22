@@ -3,6 +3,41 @@ import { logger } from "mioki";
 import { getChatConfig, updateChatConfig } from "../system";
 import aiService from "../../ai";
 
+const DEFAULT_MEMORY_GROUP_HISTORY_LIMIT = 300;
+const DEFAULT_MEMORY_USER_HISTORY_LIMIT = 100;
+
+function normalizePersonalizationConfig(input: any): any {
+  const data =
+    input && typeof input === "object" && !Array.isArray(input)
+      ? { ...input }
+      : {};
+
+  const rawMemory =
+    data.memory && typeof data.memory === "object" && !Array.isArray(data.memory)
+      ? { ...data.memory }
+      : {};
+
+  delete rawMemory.maxIterations;
+  delete rawMemory.timeoutMs;
+
+  const groupHistoryLimit = Number(rawMemory.groupHistoryLimit);
+  const userHistoryLimit = Number(rawMemory.userHistoryLimit);
+
+  rawMemory.groupHistoryLimit =
+    Number.isFinite(groupHistoryLimit) && groupHistoryLimit > 0
+      ? Math.floor(groupHistoryLimit)
+      : DEFAULT_MEMORY_GROUP_HISTORY_LIMIT;
+  rawMemory.userHistoryLimit =
+    Number.isFinite(userHistoryLimit) && userHistoryLimit > 0
+      ? Math.floor(userHistoryLimit)
+      : DEFAULT_MEMORY_USER_HISTORY_LIMIT;
+  rawMemory.enabled =
+    typeof rawMemory.enabled === "boolean" ? rawMemory.enabled : true;
+
+  data.memory = rawMemory;
+  return data;
+}
+
 export function createAIRoutes() {
   const app = new Hono();
 
@@ -15,11 +50,14 @@ export function createAIRoutes() {
     return c.json({ ok: true, data: updateChatConfig("base.json", body) });
   });
 
-  app.get("/personalization", (c) =>
-    c.json({ ok: true, data: getChatConfig("personalization.json") }),
-  );
+  app.get("/personalization", (c) => {
+    const data = normalizePersonalizationConfig(
+      getChatConfig("personalization.json"),
+    );
+    return c.json({ ok: true, data });
+  });
   app.put("/personalization", async (c) => {
-    const body = await c.req.json();
+    const body = normalizePersonalizationConfig(await c.req.json());
     logger.info(`[webui-action] ai.personalization.update`);
     return c.json({
       ok: true,
