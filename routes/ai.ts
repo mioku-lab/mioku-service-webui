@@ -5,6 +5,8 @@ import aiService from "../../ai";
 
 const DEFAULT_MEMORY_GROUP_HISTORY_LIMIT = 300;
 const DEFAULT_MEMORY_USER_HISTORY_LIMIT = 100;
+const DEFAULT_EXPRESSION_LEARN_AFTER_MESSAGES = 100;
+const DEFAULT_EXPRESSION_SAMPLE_SIZE = 8;
 
 function normalizePersonalizationConfig(input: any): any {
   const data =
@@ -35,6 +37,33 @@ function normalizePersonalizationConfig(input: any): any {
     typeof rawMemory.enabled === "boolean" ? rawMemory.enabled : true;
 
   data.memory = rawMemory;
+
+  const rawExpression =
+    data.expression &&
+    typeof data.expression === "object" &&
+    !Array.isArray(data.expression)
+      ? { ...data.expression }
+      : {};
+
+  const learnAfterMessages = Number(rawExpression.learnAfterMessages);
+  const legacyMaxExpressions = Number(rawExpression.maxExpressions);
+  const sampleSize = Number(rawExpression.sampleSize);
+
+  rawExpression.enabled =
+    typeof rawExpression.enabled === "boolean" ? rawExpression.enabled : true;
+  rawExpression.learnAfterMessages =
+    Number.isFinite(learnAfterMessages) && learnAfterMessages > 0
+      ? Math.floor(learnAfterMessages)
+      : Number.isFinite(legacyMaxExpressions) && legacyMaxExpressions > 0
+        ? Math.floor(legacyMaxExpressions)
+        : DEFAULT_EXPRESSION_LEARN_AFTER_MESSAGES;
+  rawExpression.sampleSize =
+    Number.isFinite(sampleSize) && sampleSize > 0
+      ? Math.floor(sampleSize)
+      : DEFAULT_EXPRESSION_SAMPLE_SIZE;
+  delete rawExpression.maxExpressions;
+
+  data.expression = rawExpression;
   return data;
 }
 
