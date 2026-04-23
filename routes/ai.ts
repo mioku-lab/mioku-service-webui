@@ -5,6 +5,8 @@ import aiService from "../../ai";
 
 const DEFAULT_MEMORY_GROUP_HISTORY_LIMIT = 300;
 const DEFAULT_MEMORY_USER_HISTORY_LIMIT = 100;
+const DEFAULT_TOPIC_WINDOW_HOURS = 5;
+const DEFAULT_TOPIC_HISTORY_WINDOW_COUNT = 3;
 const DEFAULT_EXPRESSION_LEARN_AFTER_MESSAGES = 100;
 const DEFAULT_EXPRESSION_SAMPLE_SIZE = 8;
 
@@ -37,6 +39,34 @@ function normalizePersonalizationConfig(input: any): any {
     typeof rawMemory.enabled === "boolean" ? rawMemory.enabled : true;
 
   data.memory = rawMemory;
+
+  const rawTopic =
+    data.topic && typeof data.topic === "object" && !Array.isArray(data.topic)
+      ? { ...data.topic }
+      : {};
+
+  const windowHours = Number(rawTopic.windowHours);
+  const legacyTimeThresholdMs = Number(rawTopic.timeThresholdMs);
+  const historyWindowCount = Number(rawTopic.historyWindowCount);
+
+  rawTopic.enabled =
+    typeof rawTopic.enabled === "boolean" ? rawTopic.enabled : true;
+  rawTopic.windowHours =
+    Number.isFinite(windowHours) && windowHours > 0
+      ? Math.floor(windowHours)
+      : Number.isFinite(legacyTimeThresholdMs) && legacyTimeThresholdMs > 0
+        ? Math.max(1, Math.floor(legacyTimeThresholdMs / 3600_000))
+        : DEFAULT_TOPIC_WINDOW_HOURS;
+  rawTopic.historyWindowCount =
+    Number.isFinite(historyWindowCount) && historyWindowCount > 0
+      ? Math.floor(historyWindowCount)
+      : DEFAULT_TOPIC_HISTORY_WINDOW_COUNT;
+
+  delete rawTopic.messageThreshold;
+  delete rawTopic.timeThresholdMs;
+  delete rawTopic.maxTopicsPerSession;
+
+  data.topic = rawTopic;
 
   const rawExpression =
     data.expression &&
