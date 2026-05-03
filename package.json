@@ -3,11 +3,18 @@
   "version": "1.9.0",
   "description": "Mioku WebUI 服务",
   "main": "index.ts",
+  "keywords": [
+    "mioku"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mioku-lab/mioku-service-webui.git"
+  },
   "dependencies": {
-    "@hono/node-server": "1.19.10",
+    "@hono/node-server": "1.19.13",
     "@hono/node-ws": "^1.2.0",
     "better-sqlite3": "^11.8.1",
     "gray-matter": "^4.0.3",
-    "hono": "4.12.7"
+    "hono": "4.12.14"
   }
 }
