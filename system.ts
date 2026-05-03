@@ -18,12 +18,12 @@ import {
   getInstallCommand,
   isValidRepoUrl,
   LOCAL_CONFIG_PATH,
+  normalizeManagedPackageName,
   normalizePackageManager,
   PLUGINS_DIR,
   readJsonFile,
   ROOT_PACKAGE_PATH,
   runCommand,
-  safeNameFromRepo,
   SERVICES_DIR,
   SETTINGS_PATH,
   WEBUI_DIST,
@@ -283,19 +283,6 @@ function readRootPackageJson(): any {
 
 function writeRootPackageJson(data: any): void {
   fs.writeFileSync(ROOT_PACKAGE_PATH, JSON.stringify(data, null, 2), "utf-8");
-}
-
-function ensureMiokiPlugins(pkg: any): string[] {
-  if (!pkg.mioki) pkg.mioki = {};
-  if (!Array.isArray(pkg.mioki.plugins)) pkg.mioki.plugins = [];
-  return pkg.mioki.plugins;
-}
-
-function updateLocalConfigPlugins(pluginNames: string[]): void {
-  const local = readJsonFile<any>(LOCAL_CONFIG_PATH, { mioki: {} });
-  if (!local.mioki) local.mioki = {};
-  local.mioki.plugins = pluginNames;
-  writeJsonFile(LOCAL_CONFIG_PATH, local);
 }
 
 function packageManagerFromSettings(input?: PackageManager): PackageManager {
@@ -814,7 +801,7 @@ export async function installManagedPackage(
   const targetRoot = getTargetRoot(input.target);
   ensureDir(targetRoot);
 
-  const packageName = safeNameFromRepo(input.repoUrl);
+  const packageName = normalizeManagedPackageName(input.repoUrl, input.target);
   const destination = path.join(targetRoot, packageName);
 
   if (fs.existsSync(destination)) {
@@ -843,16 +830,6 @@ export async function installManagedPackage(
 
   if (install.code !== 0) {
     throw new Error(`依赖安装失败: ${install.stderr || install.stdout}`);
-  }
-
-  if (input.target === "plugin") {
-    const rootPkg = readRootPackageJson();
-    const plugins = ensureMiokiPlugins(rootPkg);
-    if (!plugins.includes(packageName)) {
-      plugins.push(packageName);
-    }
-    writeRootPackageJson(rootPkg);
-    updateLocalConfigPlugins(plugins);
   }
 
   managedPackageUpdateCache.delete(
@@ -942,16 +919,6 @@ export async function removeManagedPackage(
   const dir = resolveManagedDir(input.target, input.name);
 
   fs.rmSync(dir, { recursive: true, force: true });
-
-  if (input.target === "plugin") {
-    const rootPkg = readRootPackageJson();
-    const plugins = ensureMiokiPlugins(rootPkg).filter(
-      (name: string) => name !== input.name,
-    );
-    rootPkg.mioki.plugins = plugins;
-    writeRootPackageJson(rootPkg);
-    updateLocalConfigPlugins(plugins);
-  }
 
   managedPackageUpdateCache.delete(
     makeManagedUpdateCacheKey(input.target, input.name),

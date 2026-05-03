@@ -49,6 +49,20 @@ export function safeNameFromRepo(repoUrl: string): string {
   return last.replace(/\.git$/, "").replace(/[^a-zA-Z0-9._-]/g, "-");
 }
 
+export function normalizeManagedPackageName(
+  repoUrl: string,
+  target: PackageManager extends never ? never : "plugin" | "service",
+): string {
+  const raw = safeNameFromRepo(repoUrl);
+  if (target === "plugin" && raw.startsWith("mioku-plugin-")) {
+    return raw.slice("mioku-plugin-".length) || raw;
+  }
+  if (target === "service" && raw.startsWith("mioku-service-")) {
+    return raw.slice("mioku-service-".length) || raw;
+  }
+  return raw;
+}
+
 export async function runCommand(
   command: string,
   args: string[],

@@ -19,6 +19,7 @@ import {
   createPluginConfigRoutes,
   createMemeRoutes,
   createManageRoutes,
+  createStoreRoutes,
 } from "./routes";
 
 export interface WebUIServiceAPI {
@@ -93,6 +94,7 @@ class WebUIRuntime {
     this.app.route("/api/settings", createWebUISettingsRoutes());
     this.app.route("/api/ai", createAIRoutes());
     this.app.route("/api/manage", createManageRoutes());
+    this.app.route("/api/store", createStoreRoutes());
     this.app.route("/api/db", createDBRoutes());
     this.app.route("/api/plugin-config", createPluginConfigRoutes());
     this.app.route("/api/meme", createMemeRoutes());
@@ -207,7 +209,7 @@ const runtime = new WebUIRuntime();
 
 const webUIService: MiokuService = {
   name: "webui",
-  version: "1.9.0",
+  version: "2.0.0",
   description: "Mioku WebUI 管理服务",
   api: {
     getSettings: () => getWebUISettings(),
