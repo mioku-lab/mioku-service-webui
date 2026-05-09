@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { logger } from "mioki";
 import { getChatConfig, updateChatConfig } from "../system";
 import aiService from "../../ai";
+import type { AIUsageRange } from "../../ai/usage/types";
 
 const DEFAULT_MEMORY_GROUP_HISTORY_LIMIT = 300;
 const DEFAULT_MEMORY_USER_HISTORY_LIMIT = 100;
@@ -9,6 +10,7 @@ const DEFAULT_TOPIC_WINDOW_HOURS = 5;
 const DEFAULT_TOPIC_HISTORY_WINDOW_COUNT = 3;
 const DEFAULT_EXPRESSION_LEARN_AFTER_MESSAGES = 100;
 const DEFAULT_EXPRESSION_SAMPLE_SIZE = 8;
+const usageRanges = new Set<AIUsageRange>(["today", "7d", "30d"]);
 
 function normalizePersonalizationConfig(input: any): any {
   const data =
@@ -184,6 +186,30 @@ export function createAIRoutes() {
         skills: skills ? Array.from(skills.keys()) : [],
         tools: tools ? Array.from(tools.keys()) : [],
       },
+    });
+  });
+
+  app.get("/usage", (c) => {
+    if (!aiService?.api?.getUsageSummary) {
+      return c.json({ ok: false, error: "AI_USAGE_UNAVAILABLE" }, 503);
+    }
+
+    const rawRange = c.req.query("range");
+    const range: AIUsageRange =
+      rawRange && usageRanges.has(rawRange as AIUsageRange)
+        ? (rawRange as AIUsageRange)
+        : "today";
+    const rawBotId = c.req.query("botId");
+    const botId =
+      rawBotId && rawBotId !== "all" ? Number(rawBotId) : undefined;
+
+    if (botId !== undefined && !Number.isFinite(botId)) {
+      return c.json({ ok: false, error: "INVALID_BOT_ID" }, 400);
+    }
+
+    return c.json({
+      ok: true,
+      data: aiService.api.getUsageSummary({ range, botId }),
     });
   });
 
