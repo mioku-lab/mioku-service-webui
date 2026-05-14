@@ -10,11 +10,16 @@ export const ROOT_PACKAGE_PATH = path.join(process.cwd(), "package.json");
 export const LOCAL_CONFIG_PATH = path.join(process.cwd(), "config", "mioku.json");
 
 export const WEBUI_DIST = path.join(process.cwd(), "src", "services", "webui", "dist");
+export const CONFIG_DIR = path.join(process.cwd(), "config");
+export const DATA_DIR = path.join(process.cwd(), "data");
 export const PLUGINS_DIR = path.join(process.cwd(), "plugins");
 export const SERVICES_DIR = path.join(process.cwd(), "src", "services");
 export const CHAT_CONFIG_DIR = path.join(process.cwd(), "config", "chat");
 export const CHAT_DATA_DIR = path.join(process.cwd(), "data", "chat");
 export const LOGS_DIR = path.join(process.cwd(), "logs");
+export const NODE_MODULES_DIR = path.join(process.cwd(), "node_modules");
+export const TEMP_DIR = path.join(process.cwd(), "temp");
+export const BACKUP_DIR = path.join(process.cwd(), "backup");
 
 export const defaultWebUISettings: WebUISettings = {
   port: 3339,
