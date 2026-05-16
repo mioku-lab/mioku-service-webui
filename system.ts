@@ -48,7 +48,12 @@ interface MiokiRuntimeConfig {
 
 const SYSTEM_PLUGIN_NAMES = new Set(["boot", "chat", "help"]);
 const SYSTEM_SERVICE_NAMES = new Set(["ai", "config", "help", "screenshot"]);
-const BOOT_CONFIG_PATH = path.join(process.cwd(), "config", "boot", "base.json");
+const BOOT_CONFIG_PATH = path.join(
+  process.cwd(),
+  "config",
+  "boot",
+  "base.json",
+);
 
 interface AccessRuleConfig {
   whitelist: Array<string | number>;
@@ -246,8 +251,7 @@ function normalizeBootSystemConfig(input: any): BootSystemConfig {
           : DEFAULT_BOOT_SYSTEM_CONFIG.group.minMemberCount,
       welcome: {
         enabled: Boolean(merged?.group?.welcome?.enabled),
-        mode:
-          merged?.group?.welcome?.mode === "text" ? "text" : "ai",
+        mode: merged?.group?.welcome?.mode === "text" ? "text" : "ai",
         text:
           typeof merged?.group?.welcome?.text === "string"
             ? merged.group.welcome.text
@@ -397,6 +401,44 @@ function getRepositoryFromPackage(pkg: any): string {
   if (typeof repository === "string") return repository;
   if (typeof repository?.url === "string") return repository.url;
   return "";
+}
+
+async function commandExists(cmd: string): Promise<boolean> {
+  const result = await runCommand("which", [cmd], process.cwd());
+  return result.code === 0;
+}
+
+async function ensureUnzipCommand(): Promise<void> {
+  if (await commandExists("unzip")) {
+    return;
+  }
+
+  const platform = os.platform();
+  if (platform === "darwin") {
+    const installRes = await runCommand(
+      "brew",
+      ["install", "unzip"],
+      process.cwd(),
+    );
+    if (installRes.code !== 0) {
+      throw new Error(
+        `未找到 unzip 且自动安装失败: ${installRes.stderr || installRes.stdout}。\n` +
+          `请手动运行: brew install unzip`,
+      );
+    }
+  } else {
+    const installRes = await runCommand(
+      "sudo",
+      ["apt", "install", "-y", "unzip"],
+      process.cwd(),
+    );
+    if (installRes.code !== 0) {
+      throw new Error(
+        `未找到 unzip 且自动安装失败: ${installRes.stderr || installRes.stdout}。\n` +
+          `请手动运行: sudo apt install unzip`,
+      );
+    }
+  }
 }
 
 async function getGitOriginUrl(dir: string): Promise<string> {
@@ -1490,6 +1532,8 @@ export async function updateWebUIDistFromRelease(): Promise<
 
       const buffer = Buffer.from(await downloadRes.arrayBuffer());
       fs.writeFileSync(zipPath, buffer);
+
+      await ensureUnzipCommand();
 
       const unzip = await runCommand(
         "unzip",
