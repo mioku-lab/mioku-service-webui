@@ -6,7 +6,7 @@ import { logger } from "mioki";
 export interface ConfigField {
   key: string;
   label: string;
-  type: "text" | "textarea" | "number" | "switch" | "select" | "multi-select" | "secret" | "json";
+  type: "text" | "textarea" | "number" | "switch" | "select" | "multi-select" | "secret" | "json" | "array";
   description?: string;
   placeholder?: string;
   required?: boolean;
@@ -14,6 +14,7 @@ export interface ConfigField {
   source?: string;
   options?: Array<{ value: string; label: string }>;
   defaultValue?: any;
+  itemFields?: ConfigField[];
 }
 
 export interface ConfigPageManifest {
