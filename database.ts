@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import Database from "better-sqlite3";
+import { Database } from "bun:sqlite";
 import { CHAT_DATA_DIR, readJsonFile, writeJsonFile } from "./utils";
 
 const DB_PATH = path.join(CHAT_DATA_DIR, "chat.db");
@@ -106,8 +106,8 @@ export function updateMessage(input: { table?: string; idField?: string; id: str
   try {
     const table = ensureSafeIdentifier(input.table || "messages", "表名");
     const idField = ensureSafeIdentifier(input.idField || "id", "主键字段");
-    const stmt = db.prepare(`UPDATE ${table} SET content = ? WHERE ${idField} = ?`);
-    const result = stmt.run(input.content, input.id);
+    const stmt = db.prepare(`UPDATE ${table} SET content = $content WHERE ${idField} = $id`);
+    const result = stmt.run({ $content: input.content, $id: input.id });
     return { changed: result.changes };
   } finally {
     db.close();
@@ -123,8 +123,8 @@ export function deleteMessagesByRange(input: { table?: string; startTime: number
     if (!timeColumn) {
       throw new Error(`${table} 不包含时间字段(created_at/timestamp/updated_at)`);
     }
-    const stmt = db.prepare(`DELETE FROM ${table} WHERE ${timeColumn} >= ? AND ${timeColumn} <= ?`);
-    const result = stmt.run(input.startTime, input.endTime);
+    const stmt = db.prepare(`DELETE FROM ${table} WHERE ${timeColumn} >= $startTime AND ${timeColumn} <= $endTime`);
+    const result = stmt.run({ $startTime: input.startTime, $endTime: input.endTime });
     return { deleted: result.changes };
   } finally {
     db.close();
