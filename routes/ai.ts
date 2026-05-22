@@ -1,8 +1,8 @@
 import { Hono } from "hono";
 import { logger } from "mioki";
 import { getChatConfig, updateChatConfig } from "../system";
-import aiService from "../../ai";
-import type { AIUsageRange } from "../../ai/usage/types";
+import aiService from "mioku-service-ai";
+import type { AIUsageRange } from "mioku-service-ai/usage/types";
 
 const DEFAULT_MEMORY_GROUP_HISTORY_LIMIT = 300;
 const DEFAULT_MEMORY_USER_HISTORY_LIMIT = 100;

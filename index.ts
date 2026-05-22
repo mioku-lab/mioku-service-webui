@@ -5,7 +5,7 @@ import { Hono } from "hono";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { createNodeWebSocket } from "@hono/node-ws";
-import type { MiokuService } from "../../core/types";
+import type { MiokuService } from "mioku";
 import type { WebUISettings } from "./types";
 import { ensureAuthConfig, loginWithToken, requireAuth } from "./auth";
 import { getWebUISettings, getSystemOverview, getSaying } from "./system";
