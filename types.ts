@@ -2,7 +2,7 @@
 export type ManagedTarget = "plugin" | "service";
 
 // 包管理器
-export type PackageManager = "npm" | "pnpm" | "bun";
+export type PackageManager = "bun";
 
 export interface WebUISettings {
   port: number;

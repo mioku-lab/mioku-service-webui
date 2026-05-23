@@ -4,6 +4,10 @@
   "description": "Mioku WebUI 服务",
   "main": "index.ts",
   "type": "module",
+  "scripts": {
+    "webui:dev": "cd ../mioku-webui && bun run dev",
+    "webui:build": "cd ../mioku-webui && bun run build"
+  },
   "keywords": [
     "mioku"
   ],

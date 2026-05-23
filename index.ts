@@ -220,8 +220,6 @@ const webUIService: MiokuService = {
   async init() {
     initBuiltinDatasources();
     ensureAuthConfig();
-    fs.mkdirSync(CHAT_CONFIG_DIR, { recursive: true });
-    fs.mkdirSync(CHAT_DATA_DIR, { recursive: true });
     runtime.initRoutes();
   },
 

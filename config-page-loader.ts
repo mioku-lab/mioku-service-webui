@@ -27,10 +27,25 @@ export interface ConfigPageManifest {
 }
 
 export function loadPluginConfigPage(pluginName: string): ConfigPageManifest | null {
-  const pluginDir = path.join(process.cwd(), "plugins", pluginName);
-  const configMdPath = path.join(pluginDir, "config.md");
+  // 支持两种路径：本地 plugins 目录和 npm 包
+  const possiblePaths = [
+    path.join(process.cwd(), "plugins", pluginName),
+    path.join(process.cwd(), "node_modules", `mioku-plugin-${pluginName}`),
+  ];
 
-  if (!fs.existsSync(configMdPath)) {
+  let configMdPath: string | null = null;
+  let pluginDir: string | null = null;
+
+  for (const dir of possiblePaths) {
+    const candidate = path.join(dir, "config.md");
+    if (fs.existsSync(candidate)) {
+      configMdPath = candidate;
+      pluginDir = dir;
+      break;
+    }
+  }
+
+  if (!configMdPath || !pluginDir) {
     return null;
   }
 

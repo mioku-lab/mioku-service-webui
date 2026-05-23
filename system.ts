@@ -16,12 +16,14 @@ import {
   defaultWebUISettings,
   ensureDir,
   getInstallCommand,
+  isNpmPackageName,
   isValidRepoUrl,
   LOCAL_CONFIG_PATH,
+  NODE_MODULES_DIR,
   normalizeManagedPackageName,
-  normalizePackageManager,
   PLUGINS_DIR,
   readJsonFile,
+  resolveNpmPackageName,
   ROOT_PACKAGE_PATH,
   runCommand,
   SERVICES_DIR,
@@ -29,6 +31,42 @@ import {
   WEBUI_DIST,
   writeJsonFile,
 } from "./utils";
+
+async function fetchJson(url: string): Promise<any> {
+  const res = await fetch(url, {
+    headers: {
+      Accept: "application/json",
+      "User-Agent": "mioku-store",
+    },
+  });
+  if (!res.ok) {
+    throw new Error(`HTTP_${res.status}`);
+  }
+  return res.json();
+}
+
+function normalizeRepositoryUrl(repository: any): string {
+  if (!repository) return "";
+  let raw = "";
+  if (typeof repository === "string") {
+    raw = repository;
+  } else if (typeof repository?.url === "string") {
+    raw = repository.url;
+  }
+  if (!raw) return "";
+
+  let url = raw.trim().replace(/^git\+/, "");
+  if (url.startsWith("git@")) {
+    const matched = url.match(/^git@([^:]+):(.+)$/);
+    if (matched) {
+      url = `https://${matched[1]}/${matched[2]}`;
+    }
+  }
+  if (url.startsWith("ssh://git@")) {
+    url = url.replace(/^ssh:\/\/git@/, "https://").replace(/:/, "/");
+  }
+  return url.replace(/\.git$/, "");
+}
 
 interface NapcatNodeConfig {
   name?: string;
@@ -285,16 +323,42 @@ function readRootPackageJson(): any {
   return JSON.parse(fs.readFileSync(ROOT_PACKAGE_PATH, "utf-8"));
 }
 
-function writeRootPackageJson(data: any): void {
-  fs.writeFileSync(ROOT_PACKAGE_PATH, JSON.stringify(data, null, 2), "utf-8");
+function readMiokiPackageJson(): any | null {
+  const candidates = [
+    path.join(process.cwd(), "node_modules", "mioki", "package.json"),
+    path.join(process.cwd(), "..", "node_modules", "mioki", "package.json"),
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      try {
+        return JSON.parse(fs.readFileSync(candidate, "utf-8"));
+      } catch {
+        // ignore
+      }
+    }
+  }
+  return null;
 }
 
-function packageManagerFromSettings(input?: PackageManager): PackageManager {
-  if (input) {
-    return normalizePackageManager(input);
+function readMiokuPackageJson(): any | null {
+  const candidates = [
+    path.join(process.cwd(), "node_modules", "mioku", "package.json"),
+    path.join(process.cwd(), "..", "node_modules", "mioku", "package.json"),
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      try {
+        return JSON.parse(fs.readFileSync(candidate, "utf-8"));
+      } catch {
+        // ignore
+      }
+    }
   }
-  const settings = getWebUISettings();
-  return normalizePackageManager(settings.packageManager);
+  return null;
+}
+
+function writeRootPackageJson(data: any): void {
+  fs.writeFileSync(ROOT_PACKAGE_PATH, JSON.stringify(data, null, 2), "utf-8");
 }
 
 export function getWebUISettings(): WebUISettings {
@@ -312,11 +376,7 @@ export function getWebUISettings(): WebUISettings {
       typeof settings.host === "string" && settings.host.trim()
         ? settings.host
         : defaultWebUISettings.host,
-    packageManager: normalizePackageManager(
-      typeof settings.packageManager === "string"
-        ? settings.packageManager
-        : undefined,
-    ),
+    packageManager: "bun",
   };
   writeJsonFile(SETTINGS_PATH, merged);
   return merged;
@@ -335,9 +395,7 @@ export function updateWebUISettings(
       typeof input.host === "string" && input.host.trim()
         ? input.host
         : current.host,
-    packageManager: normalizePackageManager(
-      input.packageManager ?? current.packageManager,
-    ),
+    packageManager: "bun",
   };
   writeJsonFile(SETTINGS_PATH, next);
   return next;
@@ -385,7 +443,16 @@ function assertSafePackageName(name: string): string {
 function resolveManagedDir(target: ManagedTarget, name: string): string {
   const safeName = assertSafePackageName(name);
   const root = path.resolve(getTargetRoot(target));
-  const dir = path.resolve(root, safeName);
+
+  // 对于 npm 包，前端传入的是不带前缀的名称如 "boot"，需要还原完整包名
+  let fullName = safeName;
+  if (target === "plugin" && !safeName.startsWith("mioku-plugin-")) {
+    fullName = `mioku-plugin-${safeName}`;
+  } else if (target === "service" && !safeName.startsWith("mioku-service-")) {
+    fullName = `mioku-service-${safeName}`;
+  }
+
+  const dir = path.resolve(root, fullName);
   if (!dir.startsWith(`${root}${path.sep}`)) {
     throw new Error("非法路径");
   }
@@ -809,6 +876,12 @@ async function getManagedPackageUpdateInfo(
 export function listManagedPackages(
   target: ManagedTarget,
 ): Array<Record<string, any>> {
+  if (target === "plugin") {
+    return listPluginsFromNodeModules();
+  }
+  if (target === "service") {
+    return listServicesFromNodeModules();
+  }
   const root = getTargetRoot(target);
   ensureDir(root);
   const names = fs
@@ -825,7 +898,7 @@ export function listManagedPackages(
       version: pkg?.version ?? "0.0.0",
       description: pkg?.description ?? "",
       hasGit: fs.existsSync(path.join(fullPath, ".git")),
-      isSystemPlugin: target === "plugin" ? isSystemPluginName(name) : false,
+      isSystemPlugin: false,
       isSystemService: target === "service" ? isSystemServiceName(name) : false,
       repository: getRepositoryFromPackage(pkg),
       requiredServices: pkg?.mioku?.services ?? [],
@@ -833,65 +906,189 @@ export function listManagedPackages(
   });
 }
 
+function listPluginsFromNodeModules(): Array<Record<string, any>> {
+  const plugins: Array<Record<string, any>> = [];
+  const modulesPath = NODE_MODULES_DIR;
+  if (!fs.existsSync(modulesPath)) return plugins;
+
+  const entries = fs.readdirSync(modulesPath, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.name.startsWith("mioku-plugin-")) continue;
+    const fullPath = path.join(modulesPath, entry.name);
+    const stat = fs.lstatSync(fullPath);
+    if (!stat.isDirectory() && !stat.isSymbolicLink()) continue;
+    const name = entry.name.replace(/^mioku-plugin-/, "");
+    const pkg = readPackageJson(fullPath);
+    plugins.push({
+      name,
+      path: fullPath,
+      version: pkg?.version ?? "0.0.0",
+      description: pkg?.description ?? "",
+      hasGit: fs.existsSync(path.join(fullPath, ".git")),
+      isSystemPlugin: isSystemPluginName(name),
+      isSystemService: false,
+      repository: getRepositoryFromPackage(pkg),
+      requiredServices: pkg?.mioku?.services ?? [],
+    });
+  }
+  return plugins.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function listServicesFromNodeModules(): Array<Record<string, any>> {
+  const services: Array<Record<string, any>> = [];
+  const modulesPath = NODE_MODULES_DIR;
+  if (!fs.existsSync(modulesPath)) return services;
+
+  const entries = fs.readdirSync(modulesPath, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.name.startsWith("mioku-service-")) continue;
+    const fullPath = path.join(modulesPath, entry.name);
+    const stat = fs.lstatSync(fullPath);
+    if (!stat.isDirectory() && !stat.isSymbolicLink()) continue;
+    const name = entry.name.replace(/^mioku-service-/, "");
+    const pkg = readPackageJson(fullPath);
+    services.push({
+      name,
+      path: fullPath,
+      version: pkg?.version ?? "0.0.0",
+      description: pkg?.description ?? "",
+      hasGit: fs.existsSync(path.join(fullPath, ".git")),
+      isSystemPlugin: false,
+      isSystemService: isSystemServiceName(name),
+      repository: getRepositoryFromPackage(pkg),
+      requiredServices: pkg?.mioku?.services ?? [],
+    });
+  }
+  return services.sort((a, b) => a.name.localeCompare(b.name));
+}
+
 export async function installManagedPackage(
   input: InstallRequest,
 ): Promise<Record<string, any>> {
-  if (!isValidRepoUrl(input.repoUrl)) {
-    throw new Error("仓库地址无效");
+  const installCmd = getInstallCommand();
+
+  // 判断安装方式: git clone 还是 bun install
+  if (isValidRepoUrl(input.repoUrl)) {
+    // Git 安装（第三方/自定义源）
+    const targetRoot = getTargetRoot(input.target);
+    ensureDir(targetRoot);
+
+    const packageName = normalizeManagedPackageName(
+      input.repoUrl,
+      input.target,
+    );
+    const destination = path.join(targetRoot, packageName);
+
+    if (fs.existsSync(destination)) {
+      throw new Error(`${packageName} 已存在`);
+    }
+
+    const clone = await runCommand(
+      "git",
+      ["clone", input.repoUrl, destination],
+      process.cwd(),
+    );
+    if (clone.code !== 0) {
+      throw new Error(`git clone 失败: ${clone.stderr || clone.stdout}`);
+    }
+
+    const packageJson = readPackageJson(destination);
+    const missingServices = checkDependentServices(packageJson);
+
+    const install = await runCommand(
+      installCmd.cmd,
+      installCmd.args,
+      destination,
+    );
+
+    if (install.code !== 0) {
+      throw new Error(`依赖安装失败: ${install.stderr || install.stdout}`);
+    }
+
+    managedPackageUpdateCache.delete(
+      makeManagedUpdateCacheKey(input.target, packageName),
+    );
+
+    return {
+      ok: true,
+      name: packageName,
+      missingServices,
+      packageManager: "bun",
+      restartRequired: true,
+      installOutput: install.stdout || install.stderr,
+    };
+  } else if (isNpmPackageName(input.repoUrl)) {
+    // Bun 安装（官方包）
+    const npmName = resolveNpmPackageName(input.repoUrl, input.target);
+
+    const install = await runCommand(
+      installCmd.cmd,
+      [...installCmd.args, npmName],
+      process.cwd(),
+    );
+
+    if (install.code !== 0) {
+      throw new Error(`bun install 失败: ${install.stderr || install.stdout}`);
+    }
+
+    const packageJsonPath = path.join(
+      process.cwd(),
+      "node_modules",
+      npmName,
+      "package.json",
+    );
+    const packageJson = readPackageJson(packageJsonPath);
+    const missingServices = checkDependentServices(packageJson);
+
+    return {
+      ok: true,
+      name: npmName,
+      missingServices,
+      packageManager: "bun",
+      restartRequired: true,
+      installOutput: install.stdout || install.stderr,
+    };
+  } else {
+    throw new Error("无效的包名或仓库地址");
   }
-
-  const targetRoot = getTargetRoot(input.target);
-  ensureDir(targetRoot);
-
-  const packageName = normalizeManagedPackageName(input.repoUrl, input.target);
-  const destination = path.join(targetRoot, packageName);
-
-  if (fs.existsSync(destination)) {
-    throw new Error(`${packageName} 已存在`);
-  }
-
-  const clone = await runCommand(
-    "git",
-    ["clone", input.repoUrl, destination],
-    process.cwd(),
-  );
-  if (clone.code !== 0) {
-    throw new Error(`git clone 失败: ${clone.stderr || clone.stdout}`);
-  }
-
-  const packageJson = readPackageJson(destination);
-  const missingServices = checkDependentServices(packageJson);
-
-  const packageManager = packageManagerFromSettings(input.packageManager);
-  const installCmd = getInstallCommand(packageManager);
-  const install = await runCommand(
-    installCmd.cmd,
-    installCmd.args,
-    destination,
-  );
-
-  if (install.code !== 0) {
-    throw new Error(`依赖安装失败: ${install.stderr || install.stdout}`);
-  }
-
-  managedPackageUpdateCache.delete(
-    makeManagedUpdateCacheKey(input.target, packageName),
-  );
-
-  return {
-    ok: true,
-    name: packageName,
-    missingServices,
-    packageManager,
-    restartRequired: true,
-    installOutput: install.stdout || install.stderr,
-  };
 }
 
 export async function checkUpdate(
   name: string,
   target: ManagedTarget,
 ): Promise<Record<string, any>> {
+  const isNpmPackage =
+    name.startsWith("mioku-plugin-") || name.startsWith("mioku-service-");
+
+  if (isNpmPackage) {
+    // 使用 npm view 检查 npm 包更新
+    const currentVersion = await runCommand(
+      "bun",
+      ["npm", "info", name, "version"],
+      process.cwd(),
+    );
+    const latestVersion = await runCommand(
+      "bun",
+      ["npm", "info", name, "dist-tags.latest"],
+      process.cwd(),
+    );
+    const current = currentVersion.stdout?.trim() || "";
+    const latest = latestVersion.stdout?.trim() || "";
+    const hasUpdates = current !== latest && latest !== "";
+
+    return {
+      ok: true,
+      state: "npm",
+      hasUpdates,
+      behind: hasUpdates ? 1 : 0,
+      changelog: [],
+      hasGit: false,
+      error: null,
+      currentVersion: current,
+      latestVersion: latest,
+    };
+  }
+
   const dir = resolveManagedDir(target, name);
   const result = await getManagedPackageUpdateInfo(dir);
   setCachedManagedUpdateInfo(target, name, result);
@@ -913,6 +1110,41 @@ function packageJsonChanged(before: string, after: string): boolean {
 export async function updateManagedPackage(
   input: UpdateRequest,
 ): Promise<Record<string, any>> {
+  const installCmd = getInstallCommand();
+
+  // 检查是 npm 包还是 git 包
+  const isNpmPackage =
+    input.name.startsWith("mioku-plugin-") ||
+    input.name.startsWith("mioku-service-");
+  const npmPackagePath = path.join(
+    process.cwd(),
+    "node_modules",
+    input.name,
+    "package.json",
+  );
+
+  if (isNpmPackage && fs.existsSync(npmPackagePath)) {
+    // Bun 包更新
+    const updateArgs = installCmd.args.map((arg) =>
+      arg === "install" ? "update" : arg,
+    );
+    const update = await runCommand(
+      installCmd.cmd,
+      [...updateArgs, input.name],
+      process.cwd(),
+    );
+    if (update.code !== 0) {
+      throw new Error(`bun update 失败: ${update.stderr || update.stdout}`);
+    }
+    return {
+      ok: true,
+      restartRequired: true,
+      packageJsonChanged: false,
+      reinstallOutput: update.stdout || update.stderr,
+    };
+  }
+
+  // Git 包更新
   const dir = resolveManagedDir(input.target, input.name);
 
   const before = await runCommand("git", ["show", "HEAD:package.json"], dir);
@@ -927,8 +1159,6 @@ export async function updateManagedPackage(
 
   let reinstallOutput = "";
   if (changed) {
-    const packageManager = packageManagerFromSettings(input.packageManager);
-    const installCmd = getInstallCommand(packageManager);
     const install = await runCommand(installCmd.cmd, installCmd.args, dir);
     if (install.code !== 0) {
       throw new Error(`依赖安装失败: ${install.stderr || install.stdout}`);
@@ -1022,6 +1252,83 @@ export async function getManagedPackageDetail(
   name: string,
   target: ManagedTarget,
 ): Promise<Record<string, any>> {
+  // 插件名称前端传入时没有前缀，服务有前缀
+  const isNpmPackage =
+    name.startsWith("mioku-plugin-") ||
+    name.startsWith("mioku-service-") ||
+    (target === "plugin" && /^[a-zA-Z0-9_-]+$/.test(name));
+
+  // NPM 包从 npm registry 获取信息
+  if (isNpmPackage || target === "service") {
+    let fullName = name;
+    if (target === "plugin" && !name.startsWith("mioku-plugin-")) {
+      fullName = `mioku-plugin-${name}`;
+    } else if (target === "service" && !name.startsWith("mioku-service-")) {
+      fullName = `mioku-service-${name}`;
+    }
+
+    // 从 npm registry 获取包信息
+    const data = await fetchJson(
+      `https://registry.npmjs.org/${encodeURIComponent(fullName)}`,
+    );
+    const latestVersion = String(data?.["dist-tags"]?.latest || "").trim();
+    const latest = latestVersion ? data?.versions?.[latestVersion] || {} : {};
+
+    // 服务优先使用 mioku-lab 的 GitHub 仓库地址，而不是 npm 包里的 repository 字段
+    let repositoryUrl: string;
+    if (target === "service") {
+      const serviceName = fullName.startsWith("mioku-service-")
+        ? fullName.replace(/^mioku-service-/, "")
+        : fullName;
+      repositoryUrl = `https://github.com/mioku-lab/mioku-service-${serviceName}`;
+    } else {
+      repositoryUrl = normalizeRepositoryUrl(latest?.repository);
+    }
+
+    // 获取本地已安装版本
+    const localPkg =
+      readPackageJson(path.join(NODE_MODULES_DIR, fullName)) || {};
+    const localVersion = localPkg?.version || "0.0.0";
+    const hasUpdates = latestVersion !== "" && localVersion !== latestVersion;
+
+    const isSystemPlugin =
+      target === "plugin" ? isSystemPluginName(name) : false;
+    const isSystemService =
+      target === "service" ? isSystemServiceName(name) : false;
+    return {
+      ok: true,
+      data: {
+        name: fullName.replace(/^(mioku-plugin-|mioku-service-)/, ""),
+        target,
+        path: path.join(NODE_MODULES_DIR, fullName),
+        version: localVersion,
+        latestVersion,
+        description: String(
+          latest?.description || data?.description || "",
+        ).trim(),
+        hasGit: false,
+        isSystemPlugin,
+        isSystemService,
+        repository: repositoryUrl,
+        originUrl: "",
+        homepage: String(latest?.homepage || "").trim(),
+        requiredServices: Array.isArray(latest?.mioku?.services)
+          ? latest.mioku.services
+          : [],
+        missingServices: [],
+        help: latest?.mioku?.help || null,
+        readme: String(data?.readme || "").trim(),
+        readmeFile: "README.md",
+        updateState: "npm",
+        hasUpdates,
+        behind: hasUpdates ? 1 : 0,
+        changelog: [],
+        updateError: null,
+      },
+    };
+  }
+
+  // 非 npm 包使用原有的目录解析逻辑
   const dir = resolveManagedDir(target, name);
   const pkg = readPackageJson(dir) || {};
   const readme = readReadmeFile(dir);
@@ -1034,6 +1341,9 @@ export async function getManagedPackageDetail(
     : [];
   const missingServices = checkDependentServices(pkg);
 
+  const isSystemPlugin = target === "plugin" ? isSystemPluginName(name) : false;
+  const isSystemService =
+    target === "service" ? isSystemServiceName(name) : false;
   return {
     ok: true,
     data: {
@@ -1043,8 +1353,8 @@ export async function getManagedPackageDetail(
       version: pkg?.version || "0.0.0",
       description: pkg?.description || "",
       hasGit: fs.existsSync(path.join(dir, ".git")),
-      isSystemPlugin: target === "plugin" ? isSystemPluginName(name) : false,
-      isSystemService: target === "service" ? isSystemServiceName(name) : false,
+      isSystemPlugin,
+      isSystemService,
       repository: repositoryFromPkg,
       originUrl,
       homepage: pkg?.homepage || "",
@@ -1459,8 +1769,7 @@ export async function updateMiokuFromMain(): Promise<Record<string, any>> {
 
   let reinstallOutput = "";
   if (changed) {
-    const packageManager = packageManagerFromSettings();
-    const installCmd = getInstallCommand(packageManager);
+    const installCmd = getInstallCommand();
     const install = await runCommand(installCmd.cmd, installCmd.args, cwd);
     if (install.code !== 0) {
       throw new Error(`依赖安装失败: ${install.stderr || install.stdout}`);
@@ -1833,19 +2142,45 @@ export async function getSystemOverview(): Promise<Record<string, any>> {
       osType: os.type(),
       osPlatform: os.platform(),
       osRelease: os.release(),
-      osVersion: typeof os.version === "function" ? os.version() : "unknown",
+      osVersion: (() => {
+        if (os.platform() === "darwin") {
+          try {
+            const result = require("child_process")
+              .execSync("sw_vers -productVersion")
+              .toString()
+              .trim();
+            if (result) return result;
+          } catch {
+            // ignore
+          }
+        }
+        return typeof os.version === "function" ? os.version() : "unknown";
+      })(),
       nodeVersion: process.version,
     },
     versions: {
-      mioki: normalizeVersionSpec(
-        rootPkg?.dependencies?.mioki ||
-          rootPkg?.devDependencies?.mioki ||
-          "unknown",
-      ),
-      mioku: rootPkg?.version || "unknown",
+      mioki: (() => {
+        const miokiPkg = readMiokiPackageJson();
+        if (miokiPkg?.version) return normalizeVersionSpec(miokiPkg.version);
+        return normalizeVersionSpec(
+          rootPkg?.dependencies?.mioki ||
+            rootPkg?.devDependencies?.mioki ||
+            "unknown",
+        );
+      })(),
+      mioku: (() => {
+        const miokuPkg = readMiokuPackageJson();
+        if (miokuPkg?.version) return normalizeVersionSpec(miokuPkg.version);
+        return rootPkg?.version || "unknown";
+      })(),
       webui: readInstalledWebUIVersion(),
       webuiService: readPackageVersion(
-        path.join(process.cwd(), "src", "services", "webui", "package.json"),
+        path.join(
+          process.cwd(),
+          "node_modules",
+          "mioku-service-webui",
+          "package.json",
+        ),
       ),
     },
     plugins: listManagedPackages("plugin"),
@@ -1883,10 +2218,11 @@ export interface MiokuConfig {
 }
 
 export function getMiokuConfig(): MiokuConfig {
-  const localConfig = readJsonFile<any>(LOCAL_CONFIG_PATH, { mioki: {} });
+  const localConfig = readJsonFile<any>(LOCAL_CONFIG_PATH, null);
   const rootPkg = readRootPackageJson();
 
-  const miokiConfig = localConfig?.mioki || rootPkg?.mioki || {};
+  const miokiConfig =
+    localConfig && localConfig.mioki ? localConfig.mioki : rootPkg?.mioki || {};
 
   return {
     owners: Array.isArray(miokiConfig.owners) ? miokiConfig.owners : [],
@@ -1927,12 +2263,7 @@ export function updateMiokuConfig(config: Partial<MiokuConfig>): MiokuConfig {
 }
 
 export function getAvailablePlugins(): string[] {
-  ensureDir(PLUGINS_DIR);
-  return fs
-    .readdirSync(PLUGINS_DIR, { withFileTypes: true })
-    .filter(
-      (e) =>
-        e.isDirectory() && !e.name.startsWith("_") && !e.name.startsWith("."),
-    )
-    .map((e) => e.name);
+  const rootPkg = readRootPackageJson();
+  const miokiConfig = rootPkg?.mioki || {};
+  return Array.isArray(miokiConfig.plugins) ? miokiConfig.plugins : [];
 }

@@ -78,15 +78,18 @@ export function createPluginConfigRoutes() {
   const app = new Hono();
 
   app.get("/overview", (c) => {
-    const pluginDir = path.join(process.cwd(), "plugins");
-    if (!fs.existsSync(pluginDir)) {
+    const modulesPath = path.join(process.cwd(), "node_modules");
+    if (!fs.existsSync(modulesPath)) {
       return c.json({ ok: true, data: [] });
     }
 
-    const plugins = fs.readdirSync(pluginDir).filter((name) => {
-      const pluginPath = path.join(pluginDir, name);
-      return fs.statSync(pluginPath).isDirectory();
-    });
+    const plugins: string[] = [];
+    const entries = fs.readdirSync(modulesPath, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.name.startsWith("mioku-plugin-")) {
+        plugins.push(entry.name.replace(/^mioku-plugin-/, ""));
+      }
+    }
 
     const overview = plugins
       .map((name) => {

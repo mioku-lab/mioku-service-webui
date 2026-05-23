@@ -2,10 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { Hono } from "hono";
 
-const OFFICIAL_REGISTRY_PATH = path.join(
-  process.cwd(),
-  "official-registry.json",
-);
+const OFFICIAL_REGISTRY_URL = "https://raw.githubusercontent.com/mioku-lab/mioku/main/official-registry.json";
 const NPM_PACKAGE_URL = "https://registry.npmjs.org";
 const SERVICE_ROOT = "src/services";
 
@@ -32,14 +29,22 @@ function isCacheFresh(): boolean {
   return Date.now() - officialRegistryCachedAt < CACHE_TTL_MS;
 }
 
-function readOfficialRegistry(force = false): OfficialRegistry {
+async function readOfficialRegistry(force = false): Promise<OfficialRegistry> {
   if (!force && cachedOfficialRegistry && isCacheFresh()) {
     return cachedOfficialRegistry;
   }
 
   try {
-    const raw = fs.readFileSync(OFFICIAL_REGISTRY_PATH, "utf-8");
-    const parsed = JSON.parse(raw) as OfficialRegistry;
+    const res = await fetch(OFFICIAL_REGISTRY_URL, {
+      headers: {
+        Accept: "application/json",
+        "User-Agent": "mioku-store",
+      },
+    });
+    if (!res.ok) {
+      throw new Error(`HTTP_${res.status}`);
+    }
+    const parsed = JSON.parse(await res.text()) as OfficialRegistry;
     cachedOfficialRegistry = parsed;
     officialRegistryCachedAt = Date.now();
     return parsed;
@@ -155,7 +160,7 @@ export function createStoreRoutes() {
   app.get("/official", async (c) => {
     const force = c.req.query("force") === "1";
     try {
-      const registry = readOfficialRegistry(force);
+      const registry = await readOfficialRegistry(force);
       return c.json({ ok: true, data: registry });
     } catch (error: any) {
       return c.json({ ok: false, error: error?.message || "FETCH_FAILED" }, 502);
@@ -170,7 +175,7 @@ export function createStoreRoutes() {
     }
 
     try {
-      const officialRegistry = readOfficialRegistry(force);
+      const officialRegistry = await readOfficialRegistry(force);
       const officialMaps = buildOfficialMaps(officialRegistry);
       const data = await fetchNpmPackage(packageName);
       const latestVersion = String(data?.["dist-tags"]?.latest || "").trim();

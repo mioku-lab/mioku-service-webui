@@ -10,7 +10,7 @@ function openDb(): any {
   if (!fs.existsSync(DB_PATH)) {
     throw new Error("数据库不存在");
   }
-  return new Database(DB_PATH, { readonly: false });
+  return new Database(DB_PATH, { readwrite: true });
 }
 
 function getTableColumns(db: any, table: string): string[] {
@@ -71,7 +71,7 @@ export function queryMessages(input: {
     }
     if (input.userId && columns.includes("user_id")) {
       conditions.push("user_id = @userId");
-      params.userId = input.userId;
+      params.userId = String(input.userId);
     }
     if (input.sessionId && columns.includes("session_id")) {
       conditions.push("session_id = @sessionId");
