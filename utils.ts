@@ -117,7 +117,7 @@ export async function runCommand(
 }
 
 export function getInstallCommand(): { cmd: string; args: string[] } {
-  return { cmd: "bun", args: ["add", "--no-save"] };
+  return { cmd: "bun", args: ["add", "--no-peer"] };
 }
 
 export function normalizePackageManager(): PackageManager {
