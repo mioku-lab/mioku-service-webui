@@ -529,6 +529,7 @@ function resolveWebUIProjectDir(): string {
 }
 
 function readInstalledWebUIVersion(): string {
+  // First check version files in WEBUI_DIST (written after WebUI update)
   const versionFileCandidates = [
     path.join(WEBUI_DIST, "webui-version.json"),
     path.join(WEBUI_DIST, ".webui-version"),
@@ -551,9 +552,17 @@ function readInstalledWebUIVersion(): string {
     }
   }
 
-  return readPackageVersion(
-    path.join(resolveWebUIProjectDir(), "package.json"),
-  );
+  // Fallback: read from mioku-webui package.json directly
+  // mioku-webui is at repo root, which is ../../ from packages/mioku-service-webui
+  // but since service runs from example/, we need example/../../mioku-webui
+  const webuiProjectDir = path.join(process.cwd(), "..", "..", "mioku-webui");
+  const webuiPkgPath = path.join(webuiProjectDir, "package.json");
+  if (fs.existsSync(webuiPkgPath)) {
+    const pkg = readPackageJson(webuiProjectDir);
+    if (pkg?.version) return normalizeVersionSpec(pkg.version);
+  }
+
+  return "unknown";
 }
 
 function parseGitHubRepo(
@@ -967,90 +976,58 @@ export async function installManagedPackage(
 ): Promise<Record<string, any>> {
   const installCmd = getInstallCommand();
 
-  // 判断安装方式: git clone 还是 bun install
-  if (isValidRepoUrl(input.repoUrl)) {
-    // Git 安装（第三方/自定义源）
-    const targetRoot = getTargetRoot(input.target);
-    ensureDir(targetRoot);
+  // NPM 包或 Git URL 都统一使用 bun add
+  const pkgName = isNpmPackageName(input.repoUrl)
+    ? resolveNpmPackageName(input.repoUrl, input.target)
+    : input.repoUrl.trim();
 
-    const packageName = normalizeManagedPackageName(
-      input.repoUrl,
-      input.target,
-    );
-    const destination = path.join(targetRoot, packageName);
+  // bun add 需要在 example 目录（workspace root）执行
+  const installDir = path.resolve(process.cwd());
 
-    if (fs.existsSync(destination)) {
-      throw new Error(`${packageName} 已存在`);
-    }
+  // 安装前记录现有依赖
+  const beforePkg = readPackageJson(installDir);
+  const beforeDeps = new Set([
+    ...Object.keys(beforePkg?.dependencies || {}),
+    ...Object.keys(beforePkg?.devDependencies || {}),
+  ]);
 
-    const clone = await runCommand(
-      "git",
-      ["clone", input.repoUrl, destination],
-      process.cwd(),
-    );
-    if (clone.code !== 0) {
-      throw new Error(`git clone 失败: ${clone.stderr || clone.stdout}`);
-    }
+  const install = await runCommand(
+    installCmd.cmd,
+    [...installCmd.args, pkgName],
+    installDir,
+  );
 
-    const packageJson = readPackageJson(destination);
-    const missingServices = checkDependentServices(packageJson);
-
-    const install = await runCommand(
-      installCmd.cmd,
-      installCmd.args,
-      destination,
-    );
-
-    if (install.code !== 0) {
-      throw new Error(`依赖安装失败: ${install.stderr || install.stdout}`);
-    }
-
-    managedPackageUpdateCache.delete(
-      makeManagedUpdateCacheKey(input.target, packageName),
-    );
-
-    return {
-      ok: true,
-      name: packageName,
-      missingServices,
-      packageManager: "bun",
-      restartRequired: true,
-      installOutput: install.stdout || install.stderr,
-    };
-  } else if (isNpmPackageName(input.repoUrl)) {
-    // Bun 安装（官方包）
-    const npmName = resolveNpmPackageName(input.repoUrl, input.target);
-
-    const install = await runCommand(
-      installCmd.cmd,
-      [...installCmd.args, npmName],
-      process.cwd(),
-    );
-
-    if (install.code !== 0) {
-      throw new Error(`bun install 失败: ${install.stderr || install.stdout}`);
-    }
-
-    const packageJsonPath = path.join(
-      process.cwd(),
-      "node_modules",
-      npmName,
-      "package.json",
-    );
-    const packageJson = readPackageJson(packageJsonPath);
-    const missingServices = checkDependentServices(packageJson);
-
-    return {
-      ok: true,
-      name: npmName,
-      missingServices,
-      packageManager: "bun",
-      restartRequired: true,
-      installOutput: install.stdout || install.stderr,
-    };
-  } else {
-    throw new Error("无效的包名或仓库地址");
+  if (install.code !== 0) {
+    throw new Error(`bun add 失败: ${install.stderr || install.stdout}`);
   }
+
+  // 读取 example/package.json 获取新增的包名
+  const afterPkg = readPackageJson(installDir);
+  const afterDeps = [
+    ...Object.keys(afterPkg?.dependencies || {}),
+    ...Object.keys(afterPkg?.devDependencies || {}),
+  ];
+  const installedName =
+    afterDeps.find((name) => !beforeDeps.has(name) &&
+      (name.startsWith("mioku-plugin-") || name.startsWith("mioku-service-"))) ||
+    pkgName;
+
+  const packageJsonPath = path.join(NODE_MODULES_DIR, installedName, "package.json");
+  const packageJson = readPackageJson(packageJsonPath);
+  const missingServices = checkDependentServices(packageJson);
+
+  managedPackageUpdateCache.delete(
+    makeManagedUpdateCacheKey(input.target, installedName),
+  );
+
+  return {
+    ok: true,
+    name: installedName,
+    missingServices,
+    packageManager: "bun",
+    restartRequired: true,
+    installOutput: install.stdout || install.stderr,
+  };
 }
 
 export async function checkUpdate(
