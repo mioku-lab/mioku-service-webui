@@ -117,7 +117,7 @@ export async function runCommand(
 }
 
 export function getInstallCommand(): { cmd: string; args: string[] } {
-  return { cmd: "bun", args: ["add"] };
+  return { cmd: "bun", args: ["add", "--no-save"] };
 }
 
 export function normalizePackageManager(): PackageManager {
