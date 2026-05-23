@@ -1,6 +1,6 @@
 {
   "name": "mioku-service-webui",
-  "version": "4.0.2",
+  "version": "4.0.3",
   "description": "Mioku WebUI 服务",
   "main": "index.ts",
   "type": "module",
@@ -23,7 +23,7 @@
     "hono": "4.12.14"
   },
   "peerDependencies": {
-    "mioku-service-ai": "workspace:*"
+    "mioku-service-ai": "^0.2.0"
   },
   "devDependencies": {
     "@types/bun": "^1.3.14",
