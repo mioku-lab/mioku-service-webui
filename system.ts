@@ -2240,7 +2240,22 @@ export function updateMiokuConfig(config: Partial<MiokuConfig>): MiokuConfig {
 }
 
 export function getAvailablePlugins(): string[] {
-  const rootPkg = readRootPackageJson();
-  const miokiConfig = rootPkg?.mioki || {};
-  return Array.isArray(miokiConfig.plugins) ? miokiConfig.plugins : [];
+  const modulesPath = NODE_MODULES_DIR;
+  if (!fs.existsSync(modulesPath)) {
+    // Fallback to config-based reading
+    const rootPkg = readRootPackageJson();
+    const miokiConfig = rootPkg?.mioki || {};
+    return Array.isArray(miokiConfig.plugins) ? miokiConfig.plugins : [];
+  }
+
+  const plugins: string[] = [];
+  const entries = fs.readdirSync(modulesPath, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.name.startsWith("mioku-plugin-")) continue;
+    const fullPath = path.join(modulesPath, entry.name);
+    const stat = fs.lstatSync(fullPath);
+    if (!stat.isDirectory() && !stat.isSymbolicLink()) continue;
+    plugins.push(entry.name.replace(/^mioku-plugin-/, ""));
+  }
+  return plugins.sort((a, b) => a.localeCompare(b));
 }
