@@ -1,6 +1,6 @@
 {
   "name": "mioku-service-webui",
-  "version": "4.0.5",
+  "version": "4.0.6",
   "description": "Mioku WebUI 服务",
   "main": "index.ts",
   "type": "module",
@@ -18,6 +18,8 @@
   "dependencies": {
     "@hono/node-server": "1.19.13",
     "@hono/node-ws": "^1.2.0",
+    "@types/adm-zip": "^0.5.8",
+    "adm-zip": "^0.5.16",
     "fflate": "^0.8.2",
     "gray-matter": "^4.0.3",
     "hono": "4.12.14"

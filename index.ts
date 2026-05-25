@@ -8,7 +8,7 @@ import { createNodeWebSocket } from "@hono/node-ws";
 import type { MiokuService } from "mioku";
 import type { WebUISettings } from "./types";
 import { ensureAuthConfig, loginWithToken, requireAuth } from "./auth";
-import { getWebUISettings, getSystemOverview, getSaying } from "./system";
+import { ensureWebUIDist, getWebUISettings, getSystemOverview, getSaying } from "./system";
 import { CHAT_CONFIG_DIR, CHAT_DATA_DIR, LOGS_DIR, WEBUI_DIST } from "./utils";
 import { initBuiltinDatasources } from "./datasources";
 import {
@@ -220,6 +220,7 @@ const webUIService: MiokuService = {
   async init() {
     initBuiltinDatasources();
     ensureAuthConfig();
+    await ensureWebUIDist();
     runtime.initRoutes();
   },
 

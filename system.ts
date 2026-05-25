@@ -2,7 +2,8 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import process from "node:process";
-import { connectedBots, systemInfo } from "mioki";
+import AdmZip from "adm-zip";
+import { connectedBots, logger, systemInfo } from "mioki";
 import type {
   InstallRequest,
   ManagedTarget,
@@ -701,6 +702,7 @@ interface WebUIUpdateCheckResult {
   assetUrl: string;
   checkedAt: number;
   error?: string;
+  proxiedAssetUrl?: string;
 }
 
 interface MiokuUpdateCheckResult {
@@ -1568,6 +1570,9 @@ async function fetchLatestWebUIUpdate(
         hasUpdates && !distAsset
           ? "已检测到新版本，但 Release 没有可用 dist 压缩包"
           : "",
+      proxiedAssetUrl: distAsset
+        ? `https://gh-proxy.org/${encodeURIComponent(distAsset.browser_download_url)}`
+        : "",
     };
   })();
 
@@ -1805,7 +1810,8 @@ export async function updateWebUIDistFromRelease(): Promise<
 
     let backupPath = "";
     try {
-      const downloadRes = await fetch(check.assetUrl, {
+      const downloadUrl = check.proxiedAssetUrl || check.assetUrl;
+      const downloadRes = await fetch(downloadUrl, {
         headers: {
           Accept: "application/octet-stream",
           "User-Agent": "mioku-webui-updater",
@@ -1819,16 +1825,8 @@ export async function updateWebUIDistFromRelease(): Promise<
       const buffer = Buffer.from(await downloadRes.arrayBuffer());
       fs.writeFileSync(zipPath, buffer);
 
-      await ensureUnzipCommand();
-
-      const unzip = await runCommand(
-        "unzip",
-        ["-oq", zipPath, "-d", unpackDir],
-        process.cwd(),
-      );
-      if (unzip.code !== 0) {
-        throw new Error(`解压失败: ${unzip.stderr || unzip.stdout}`);
-      }
+      const zip = new AdmZip(zipPath);
+      zip.extractAllTo(unpackDir, true);
 
       const sourceDir = resolveDistSourceDir(unpackDir);
       if (!sourceDir) {
@@ -1891,6 +1889,16 @@ export async function updateWebUIDistFromRelease(): Promise<
 
   webuiUpdatingInFlight = task;
   return task;
+}
+
+export async function ensureWebUIDist(): Promise<void> {
+  // Skip if dist already exists and has usable files
+  if (hasUsableDistFiles(WEBUI_DIST)) {
+    return;
+  }
+  // Dist missing — trigger download
+  logger.info("[webui] WebUI dist 未找到，正在下载...");
+  await updateWebUIDistFromRelease();
 }
 
 function readPackageVersion(filePath: string): string {
