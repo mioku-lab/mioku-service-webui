@@ -1798,6 +1798,9 @@ export async function updateWebUIDistFromRelease(): Promise<
       );
     }
 
+    let lastLogTime = 0;
+    const LOG_INTERVAL_MS = 2000;
+    const downloadUrl = new URL(check.assetUrl);
     const tempDir = path.join(
       os.tmpdir(),
       `mioku-webui-update-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -1810,7 +1813,6 @@ export async function updateWebUIDistFromRelease(): Promise<
 
     let backupPath = "";
     try {
-      const downloadUrl = check.proxiedAssetUrl || check.assetUrl;
       const downloadRes = await fetch(downloadUrl, {
         headers: {
           Accept: "application/octet-stream",
@@ -1822,7 +1824,41 @@ export async function updateWebUIDistFromRelease(): Promise<
         throw new Error(`下载 dist 压缩包失败: HTTP_${downloadRes.status}`);
       }
 
-      const buffer = Buffer.from(await downloadRes.arrayBuffer());
+      const contentLength = Number(downloadRes.headers.get("content-length") || 0);
+      const reader = downloadRes.body?.getReader();
+      if (!reader) {
+        throw new Error("无法读取下载流");
+      }
+
+      const chunks: Buffer[] = [];
+      let receivedBytes = 0;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        if (value) {
+          chunks.push(Buffer.from(value));
+          receivedBytes += value.length;
+
+          if (contentLength > 0) {
+            const now = Date.now();
+            if (now - lastLogTime >= LOG_INTERVAL_MS) {
+              const progress = Math.round((receivedBytes / contentLength) * 100);
+              logger.info(`[webui] 正在下载 WebUI dist... ${receivedBytes}/${contentLength} bytes (${progress}%)`);
+              lastLogTime = now;
+            }
+          }
+        }
+      }
+
+      if (contentLength > 0 && receivedBytes !== contentLength) {
+        logger.warn(`[webui] 下载字节数不匹配: 预期 ${contentLength}, 实际 ${receivedBytes}`);
+      }
+
+      logger.info(`[webui] 下载完成，正在解压...`);
+
+      const buffer = Buffer.concat(chunks);
       fs.writeFileSync(zipPath, buffer);
 
       const zip = new AdmZip(zipPath);
