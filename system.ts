@@ -13,6 +13,7 @@ import type {
   WebUISettings,
 } from "./types";
 import {
+  AUTH_PATH,
   CHAT_CONFIG_DIR,
   defaultWebUISettings,
   ensureDir,
@@ -1706,7 +1707,15 @@ async function notifyOwnerWebUIDownloaded(version: string): Promise<void> {
   }
 
   const bot = bots[0];
-  const message = `🎉 WebUI 已自动更新到 v${version}，记得重启哦~`;
+  const settings = getWebUISettings();
+  const auth = readJsonFile<{ token?: string }>(AUTH_PATH, {});
+  const url = `http://${settings.host}:${settings.port}`;
+  const token = auth?.token || "未设置";
+  const message = [
+    `🎉 WebUI v${version} 已就绪`,
+    `地址: ${url}`,
+    `鉴权密钥: ${token}`,
+  ].join("\n");
 
   for (const ownerId of owners) {
     try {
