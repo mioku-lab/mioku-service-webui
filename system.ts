@@ -32,6 +32,7 @@ import {
   WEBUI_DIST,
   writeJsonFile,
 } from "./utils";
+import { spawn } from "node:child_process";
 
 async function fetchJson(url: string): Promise<any> {
   const res = await fetch(url, {
@@ -516,17 +517,7 @@ async function getGitOriginUrl(dir: string): Promise<string> {
 }
 
 function resolveWebUIProjectDir(): string {
-  const candidates = [
-    path.join(process.cwd(), "mioku-webui"),
-    path.join(process.cwd(), "webui"),
-  ];
-
-  for (const dir of candidates) {
-    if (fs.existsSync(path.join(dir, "package.json"))) {
-      return dir;
-    }
-  }
-  return candidates[0];
+  return path.join(process.cwd(), "..", "mioku-webui");
 }
 
 function readInstalledWebUIVersion(): string {
@@ -1010,11 +1001,17 @@ export async function installManagedPackage(
     ...Object.keys(afterPkg?.devDependencies || {}),
   ];
   const installedName =
-    afterDeps.find((name) => !beforeDeps.has(name) &&
-      (name.startsWith("mioku-plugin-") || name.startsWith("mioku-service-"))) ||
-    pkgName;
+    afterDeps.find(
+      (name) =>
+        !beforeDeps.has(name) &&
+        (name.startsWith("mioku-plugin-") || name.startsWith("mioku-service-")),
+    ) || pkgName;
 
-  const packageJsonPath = path.join(NODE_MODULES_DIR, installedName, "package.json");
+  const packageJsonPath = path.join(
+    NODE_MODULES_DIR,
+    installedName,
+    "package.json",
+  );
   const packageJson = readPackageJson(packageJsonPath);
   const missingServices = checkDependentServices(packageJson);
 
@@ -1500,32 +1497,26 @@ async function fetchLatestWebUIUpdate(
   }
 
   const job = (async () => {
-    const projectDir = resolveWebUIProjectDir();
     const currentVersion = readInstalledWebUIVersion();
-    const pkg = readPackageJson(projectDir) || {};
-    const originUrl = (await getGitOriginUrl(projectDir)) || "";
-    const repoUrl = originUrl || getRepositoryFromPackage(pkg);
-    const repo = parseGitHubRepo(repoUrl);
+    // mioku-webui repo is at mioku-lab/mioku-webui, used for GitHub API and dist download
+    const repo = {
+      owner: "mioku-lab",
+      repo: "mioku-webui",
+      fullName: "mioku-lab/mioku-webui",
+    };
 
     const fallback: WebUIUpdateCheckResult = {
       currentVersion,
       latestVersion: currentVersion,
       releaseTag: "",
       releaseUrl: "",
-      sourceRepo: repo?.fullName || "",
+      sourceRepo: repo.fullName,
       hasUpdates: false,
       canUpdate: false,
       assetName: "",
       assetUrl: "",
       checkedAt: Date.now(),
     };
-
-    if (!repo) {
-      return {
-        ...fallback,
-        error: "WebUI 仓库不是 GitHub，暂不支持自动检查更新",
-      };
-    }
 
     const res = await fetch(
       `https://api.github.com/repos/${repo.owner}/${repo.repo}/releases/latest`,
@@ -1612,101 +1603,36 @@ async function fetchLatestMiokuUpdate(
     const cwd = process.cwd();
     const rootPkg = readRootPackageJson() || {};
     const currentVersion = normalizeVersionSpec(rootPkg?.version || "unknown");
-    const originUrl = (await getGitOriginUrl(cwd)) || "";
-    const repoUrl = originUrl || getRepositoryFromPackage(rootPkg);
-    const repo = parseGitHubRepo(repoUrl);
-    const { currentBranch, targetRef, targetBranch } =
-      await resolveMiokuTargetRef(cwd);
 
-    const fallback: MiokuUpdateCheckResult = {
-      currentVersion,
-      latestVersion: currentVersion,
-      sourceRepo: repo?.fullName || "",
-      currentBranch,
-      targetRef,
-      hasUpdates: false,
-      behind: 0,
-      changelog: [],
-      checkedAt: Date.now(),
-    };
-
-    if (!fs.existsSync(path.join(cwd, ".git"))) {
-      return {
-        ...fallback,
-        error: isContainerRuntime()
-          ? "当前 Docker 容器未挂载 .git 到 /app/.git，无法检查 Mioku 更新"
-          : "当前目录不是 Git 仓库，无法检查 Mioku 更新",
-      };
-    }
-
-    if (!repo) {
-      return {
-        ...fallback,
-        error: "Mioku 仓库不是 GitHub，暂不支持自动检查更新",
-      };
-    }
-
-    const fetchRes = await runCommand(
-      "git",
-      ["fetch", "origin", targetBranch],
-      cwd,
-    );
-
-    if (fetchRes.code !== 0) {
-      return {
-        ...fallback,
-        error: `git fetch 失败: ${fetchRes.stderr || fetchRes.stdout}`.trim(),
-      };
-    }
-
-    const compare = await runCommand(
-      "git",
-      ["rev-list", "--left-right", "--count", `HEAD...${targetRef}`],
-      cwd,
-    );
-
-    if (compare.code !== 0) {
-      return {
-        ...fallback,
-        error: `无法比较更新: ${compare.stderr || compare.stdout}`.trim(),
-      };
-    }
-
-    const parts = compare.stdout
-      .trim()
-      .split(/\s+/)
-      .map((item) => Number(item));
-    const behind = Number.isFinite(parts[1]) ? parts[1] : 0;
-    const changelogRes = await runCommand(
-      "git",
-      ["log", "--oneline", `HEAD..${targetRef}`, "-n", "30"],
-      cwd,
-    );
-
+    // Get latest version from npm registry
     let latestVersion = currentVersion;
-    const remotePkg = await runCommand(
-      "git",
-      ["show", `${targetRef}:package.json`],
-      cwd,
-    );
-    if (remotePkg.code === 0) {
-      try {
-        const parsed = JSON.parse(remotePkg.stdout);
-        latestVersion = normalizeVersionSpec(parsed?.version || currentVersion);
-      } catch {
-        latestVersion = currentVersion;
+    try {
+      const latestOutput = await runCommand(
+        "bun",
+        ["info", "mioku", "version"],
+        cwd,
+      );
+      if (latestOutput.code === 0 && latestOutput.stdout.trim()) {
+        latestVersion = normalizeVersionSpec(latestOutput.stdout.trim());
       }
+    } catch {
+      // ignore - keep currentVersion as fallback
     }
+
+    const hasUpdates =
+      latestVersion !== "unknown" &&
+      currentVersion !== "unknown" &&
+      isVersionNewer(latestVersion, currentVersion);
 
     return {
       currentVersion,
       latestVersion,
-      sourceRepo: repo.fullName,
-      currentBranch,
-      targetRef,
-      hasUpdates: behind > 0,
-      behind,
-      changelog: changelogRes.stdout.trim().split("\n").filter(Boolean),
+      sourceRepo: "mioku",
+      currentBranch: "",
+      targetRef: "",
+      hasUpdates,
+      behind: hasUpdates ? 1 : 0,
+      changelog: [],
       checkedAt: Date.now(),
       error: "",
     };
@@ -1730,24 +1656,18 @@ export async function checkMiokuReleaseUpdate(
 
 export async function updateMiokuFromMain(): Promise<Record<string, any>> {
   const cwd = process.cwd();
-  if (!fs.existsSync(path.join(cwd, ".git"))) {
-    throw new Error(
-      isContainerRuntime()
-        ? "当前 Docker 容器未挂载 .git 到 /app/.git，无法更新 Mioku"
-        : "当前目录不是 Git 仓库，无法更新 Mioku",
-    );
+
+  const beforePkg = readRootPackageJson();
+  const beforeVersion = beforePkg?.version || "unknown";
+
+  const update = await runCommand("bun", ["update", "mioku"], cwd);
+  if (update.code !== 0) {
+    throw new Error(`bun update mioku 失败: ${update.stderr || update.stdout}`);
   }
 
-  const { targetBranch } = await resolveMiokuTargetRef(cwd);
-  const before = await runCommand("git", ["show", "HEAD:package.json"], cwd);
-  const pull = await runCommand("git", ["pull", "origin", targetBranch], cwd);
-
-  if (pull.code !== 0) {
-    throw new Error(`git pull 失败: ${pull.stderr || pull.stdout}`);
-  }
-
-  const after = await runCommand("git", ["show", "HEAD:package.json"], cwd);
-  const changed = packageJsonChanged(before.stdout, after.stdout);
+  const afterPkg = readRootPackageJson();
+  const afterVersion = afterPkg?.version || beforeVersion;
+  const changed = beforeVersion !== afterVersion;
 
   let reinstallOutput = "";
   if (changed) {
@@ -1771,6 +1691,33 @@ export async function updateMiokuFromMain(): Promise<Record<string, any>> {
     latestVersion: next.latestVersion,
     hasUpdates: next.hasUpdates,
   };
+}
+
+async function notifyOwnerWebUIDownloaded(version: string): Promise<void> {
+  const miokuConfig = getMiokuConfig();
+  const owners = miokuConfig?.owners || [];
+  if (owners.length === 0) {
+    return;
+  }
+
+  const bots = Array.from(connectedBots.values());
+  if (bots.length === 0) {
+    return;
+  }
+
+  const bot = bots[0];
+  const message = `🎉 WebUI 已自动更新到 v${version}，记得重启哦~`;
+
+  for (const ownerId of owners) {
+    try {
+      await bot.api("send_private_msg", {
+        user_id: Number(ownerId),
+        message,
+      });
+    } catch (err: any) {
+      logger.warn(`[webui] 通知主人 ${ownerId} 失败: ${err?.message || err}`);
+    }
+  }
 }
 
 export async function updateWebUIDistFromRelease(): Promise<
@@ -1800,7 +1747,7 @@ export async function updateWebUIDistFromRelease(): Promise<
 
     let lastLogTime = 0;
     const LOG_INTERVAL_MS = 2000;
-    const downloadUrl = new URL(check.assetUrl);
+    const downloadUrl = check.assetUrl;
     const tempDir = path.join(
       os.tmpdir(),
       `mioku-webui-update-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -1813,53 +1760,65 @@ export async function updateWebUIDistFromRelease(): Promise<
 
     let backupPath = "";
     try {
-      const downloadRes = await fetch(downloadUrl, {
-        headers: {
-          Accept: "application/octet-stream",
-          "User-Agent": "mioku-webui-updater",
-        },
-      });
+      logger.info(`[webui] 正在下载 WebUI dist...`);
 
-      if (!downloadRes.ok) {
-        throw new Error(`下载 dist 压缩包失败: HTTP_${downloadRes.status}`);
-      }
+      await new Promise<void>((resolve, reject) => {
+        const curl = spawn(
+          "curl",
+          [
+            "-L",
+            "-o",
+            zipPath,
+            "-A",
+            "mioku-webui-updater/1.0",
+            "--silent",
+            "--show-error",
+            downloadUrl,
+          ],
+          {
+            stdio: ["ignore", "pipe", "pipe"],
+          },
+        );
 
-      const contentLength = Number(downloadRes.headers.get("content-length") || 0);
-      const reader = downloadRes.body?.getReader();
-      if (!reader) {
-        throw new Error("无法读取下载流");
-      }
+        let stderr = "";
+        curl.stderr.on("data", (chunk) => {
+          stderr += String(chunk);
+        });
 
-      const chunks: Buffer[] = [];
-      let receivedBytes = 0;
+        curl.on("close", (code) => {
+          if (code === 0) {
+            resolve();
+          } else {
+            reject(new Error(`curl 下载失败 (code ${code}): ${stderr}`));
+          }
+        });
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+        curl.on("error", (err) => {
+          reject(new Error(`curl 进程异常: ${err.message}`));
+        });
 
-        if (value) {
-          chunks.push(Buffer.from(value));
-          receivedBytes += value.length;
-
-          if (contentLength > 0) {
+        // Periodically log progress by checking file size
+        const progressTimer = setInterval(() => {
+          if (fs.existsSync(zipPath)) {
+            const stat = fs.statSync(zipPath);
             const now = Date.now();
             if (now - lastLogTime >= LOG_INTERVAL_MS) {
-              const progress = Math.round((receivedBytes / contentLength) * 100);
-              logger.info(`[webui] 正在下载 WebUI dist... ${receivedBytes}/${contentLength} bytes (${progress}%)`);
+              logger.info(
+                `[webui] 正在下载 WebUI dist... ${(stat.size / 1024 / 1024).toFixed(1)} MB 已下载`,
+              );
               lastLogTime = now;
             }
           }
-        }
-      }
+        }, 1000);
 
-      if (contentLength > 0 && receivedBytes !== contentLength) {
-        logger.warn(`[webui] 下载字节数不匹配: 预期 ${contentLength}, 实际 ${receivedBytes}`);
-      }
+        // Clear timer when done
+        curl.on("close", () => clearInterval(progressTimer));
+      });
 
-      logger.info(`[webui] 下载完成，正在解压...`);
-
-      const buffer = Buffer.concat(chunks);
-      fs.writeFileSync(zipPath, buffer);
+      const zipStat = fs.statSync(zipPath);
+      logger.info(
+        `[webui] 下载完成 (${(zipStat.size / 1024 / 1024).toFixed(1)} MB)，正在解压...`,
+      );
 
       const zip = new AdmZip(zipPath);
       zip.extractAllTo(unpackDir, true);
@@ -1910,6 +1869,8 @@ export async function updateWebUIDistFromRelease(): Promise<
       canUpdate: false,
       error: "",
     };
+
+    await notifyOwnerWebUIDownloaded(check.latestVersion);
 
     return {
       ok: true,
