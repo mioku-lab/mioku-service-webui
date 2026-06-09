@@ -21,6 +21,7 @@ import {
   createManageRoutes,
   createStoreRoutes,
   createDataManagementRoutes,
+  createStrangerRoutes,
 } from "./routes";
 
 export interface WebUIServiceAPI {
@@ -100,6 +101,7 @@ class WebUIRuntime {
     this.app.route("/api/plugin-config", createPluginConfigRoutes());
     this.app.route("/api/meme", createMemeRoutes());
     this.app.route("/api/data-management", createDataManagementRoutes());
+    this.app.route("/api/stranger", createStrangerRoutes());
 
     this.app.get(
       "/api/ws/logs",

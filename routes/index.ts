@@ -5,3 +5,4 @@ export { createDBRoutes, createPluginConfigRoutes, createMemeRoutes } from "./db
 export { createManageRoutes } from "./manage";
 export { createStoreRoutes } from "./store";
 export { createDataManagementRoutes } from "./data-management";
+export { createStrangerRoutes } from "./stranger";
