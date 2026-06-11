@@ -8,7 +8,12 @@ import { createNodeWebSocket } from "@hono/node-ws";
 import type { MiokuService } from "mioku";
 import type { WebUISettings } from "./types";
 import { ensureAuthConfig, loginWithToken, requireAuth } from "./auth";
-import { ensureWebUIDist, getWebUISettings, getSystemOverview, getSaying } from "./system";
+import {
+  ensureWebUIDist,
+  getWebUISettings,
+  getSystemOverview,
+  getSaying,
+} from "./system";
 import { CHAT_CONFIG_DIR, CHAT_DATA_DIR, LOGS_DIR, WEBUI_DIST } from "./utils";
 import { initBuiltinDatasources } from "./datasources";
 import {
@@ -22,6 +27,7 @@ import {
   createStoreRoutes,
   createDataManagementRoutes,
   createStrangerRoutes,
+  createAccessControlRoutes,
 } from "./routes";
 
 export interface WebUIServiceAPI {
@@ -102,6 +108,7 @@ class WebUIRuntime {
     this.app.route("/api/meme", createMemeRoutes());
     this.app.route("/api/data-management", createDataManagementRoutes());
     this.app.route("/api/stranger", createStrangerRoutes());
+    this.app.route("/api/access-control", createAccessControlRoutes());
 
     this.app.get(
       "/api/ws/logs",
@@ -213,7 +220,7 @@ const runtime = new WebUIRuntime();
 
 const webUIService: MiokuService = {
   name: "webui",
-  version: "2.0.0",
+  version: "4.2.0",
   description: "Mioku WebUI 管理服务",
   api: {
     getSettings: () => getWebUISettings(),
