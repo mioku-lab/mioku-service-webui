@@ -37,6 +37,7 @@ interface AccessItem {
   label: string;
   desc?: string;
   match?: string;
+  event?: string;
   fromHook: boolean;
 }
 
@@ -68,7 +69,7 @@ function readAccessCatalog(): AccessItem[] {
     const name = entry.name.replace(/^mioku-plugin-/, "");
     const mioku = pkg.mioku || {};
     const help = mioku.help || { title: name, description: "", commands: [] };
-    const hooks: Array<{ id: string; match: string; description?: string }> =
+    const hooks: Array<{ id: string; match?: string; event?: string; description?: string }> =
       mioku.accessHooks || [];
     const helpCommands: Array<any> = help.commands || [];
 
@@ -91,6 +92,7 @@ function readAccessCatalog(): AccessItem[] {
         label: hook.id,
         desc: hook.description,
         match: hook.match,
+        event: hook.event,
         fromHook: true,
       });
     }
