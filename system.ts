@@ -322,6 +322,26 @@ function readPackageJson(dir: string): any {
   }
 }
 
+const WEBUI_PLUGIN_PREFIX = "mioku-plugin-";
+
+function appendToMiokiPlugins(cwd: string, pkgName: string): boolean {
+  if (!pkgName.startsWith(WEBUI_PLUGIN_PREFIX)) return false;
+  const shortName = pkgName.slice(WEBUI_PLUGIN_PREFIX.length);
+
+  const packageJsonPath = path.join(cwd, "package.json");
+  if (!fs.existsSync(packageJsonPath)) return false;
+
+  const pkg = JSON.parse(fs.readFileSync(packageJsonPath, "utf-8"));
+  const mioki = pkg.mioki ?? {};
+  const plugins = Array.isArray(mioki.plugins) ? [...mioki.plugins] : [];
+  if (plugins.includes(shortName)) return false;
+
+  plugins.push(shortName);
+  pkg.mioki = { ...mioki, plugins };
+  fs.writeFileSync(packageJsonPath, `${JSON.stringify(pkg, null, 2)}\n`);
+  return true;
+}
+
 function readRootPackageJson(): any {
   return JSON.parse(fs.readFileSync(ROOT_PACKAGE_PATH, "utf-8"));
 }
@@ -1020,12 +1040,18 @@ export async function installManagedPackage(
     makeManagedUpdateCacheKey(input.target, installedName),
   );
 
+  let enabled = false;
+  if (input.target === "plugin") {
+    enabled = appendToMiokiPlugins(installDir, installedName);
+  }
+
   return {
     ok: true,
     name: installedName,
     missingServices,
     packageManager: "bun",
     restartRequired: true,
+    enabled,
     installOutput: install.stdout || install.stderr,
   };
 }
