@@ -27,25 +27,40 @@ export interface ConfigPageManifest {
 }
 
 export function loadPluginConfigPage(pluginName: string): ConfigPageManifest | null {
-  // 支持两种路径：本地 plugins 目录和 npm 包
   const possiblePaths = [
     path.join(process.cwd(), "plugins", pluginName),
     path.join(process.cwd(), "node_modules", `mioku-plugin-${pluginName}`),
   ];
 
+  return loadConfigPage(pluginName, possiblePaths);
+}
+
+export function loadServiceConfigPage(serviceName: string): ConfigPageManifest | null {
+  const possiblePaths = [
+    path.join(process.cwd(), "services", serviceName),
+    path.join(process.cwd(), "node_modules", `mioku-service-${serviceName}`),
+  ];
+
+  return loadConfigPage(serviceName, possiblePaths);
+}
+
+function loadConfigPage(
+  packageName: string,
+  possiblePaths: string[],
+): ConfigPageManifest | null {
   let configMdPath: string | null = null;
-  let pluginDir: string | null = null;
+  let packageDir: string | null = null;
 
   for (const dir of possiblePaths) {
     const candidate = path.join(dir, "config.md");
     if (fs.existsSync(candidate)) {
       configMdPath = candidate;
-      pluginDir = dir;
+      packageDir = dir;
       break;
     }
   }
 
-  if (!configMdPath || !pluginDir) {
+  if (!configMdPath || !packageDir) {
     return null;
   }
 
@@ -56,29 +71,27 @@ export function loadPluginConfigPage(pluginName: string): ConfigPageManifest | n
     const frontmatter = parsed.data as any;
     const fields = (frontmatter.fields || []) as ConfigField[];
 
-    // Validate fields
     for (const field of fields) {
       if (!field.key || !field.label || !field.type) {
-        logger.warn(`Invalid field in ${pluginName}/config.md: missing key, label, or type`);
+        logger.warn(`Invalid field in ${packageName}/config.md: missing key, label, or type`);
         continue;
       }
 
-      // Validate key format: <configName>.<jsonPath>
       if (!field.key.includes(".")) {
-        logger.warn(`Invalid field key in ${pluginName}/config.md: ${field.key} (must be <configName>.<path>)`);
+        logger.warn(`Invalid field key in ${packageName}/config.md: ${field.key} (must be <configName>.<path>)`);
       }
     }
 
     return {
-      plugin: pluginName,
-      title: frontmatter.title || `${pluginName} Configuration`,
+      plugin: packageName,
+      title: frontmatter.title || `${packageName} Configuration`,
       description: frontmatter.description,
       markdown: parsed.content,
       fields,
       hasCustomPage: true,
     };
   } catch (error: any) {
-    logger.error(`Failed to load config page for ${pluginName}: ${error.message}`);
+    logger.error(`Failed to load config page for ${packageName}: ${error.message}`);
     return null;
   }
 }

@@ -22,6 +22,7 @@ import {
   createAIRoutes,
   createDBRoutes,
   createPluginConfigRoutes,
+  createServiceConfigRoutes,
   createMemeRoutes,
   createManageRoutes,
   createStoreRoutes,
@@ -105,6 +106,7 @@ class WebUIRuntime {
     this.app.route("/api/store", createStoreRoutes());
     this.app.route("/api/db", createDBRoutes());
     this.app.route("/api/plugin-config", createPluginConfigRoutes());
+    this.app.route("/api/service-config", createServiceConfigRoutes());
     this.app.route("/api/meme", createMemeRoutes());
     this.app.route("/api/data-management", createDataManagementRoutes());
     this.app.route("/api/stranger", createStrangerRoutes());

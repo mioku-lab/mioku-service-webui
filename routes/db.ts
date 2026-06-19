@@ -14,8 +14,12 @@ import {
   updateMessage,
 } from "../database";
 import { CHAT_DATA_DIR } from "../utils";
-import { loadPluginConfigPage } from "../config-page-loader";
+import { loadPluginConfigPage, loadServiceConfigPage } from "../config-page-loader";
 import { getDatasource } from "../datasources";
+import {
+  getServiceConfigs,
+  updateServiceConfig,
+} from "mioku";
 
 export function createDBRoutes() {
   const app = new Hono();
@@ -214,6 +218,101 @@ export function createMemeRoutes() {
       return c.json({ ok: false, error: "NOT_FOUND" }, 404);
     }
     fs.unlinkSync(filePath);
+    return c.json({ ok: true });
+  });
+
+  return app;
+}
+
+export function createServiceConfigRoutes() {
+  const app = new Hono();
+  const SERVICE_CONFIG_ROOT = path.join(process.cwd(), "config", "service");
+
+  app.get("/overview", (c) => {
+    const modulesPath = path.join(process.cwd(), "node_modules");
+    if (!fs.existsSync(modulesPath)) {
+      return c.json({ ok: true, data: [] });
+    }
+
+    const services: string[] = [];
+    const entries = fs.readdirSync(modulesPath, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.name.startsWith("mioku-service-")) {
+        services.push(entry.name.replace(/^mioku-service-/, ""));
+      }
+    }
+
+    const overview = services
+      .map((name) => {
+        const configDir = path.join(SERVICE_CONFIG_ROOT, name);
+        const manifest = loadServiceConfigPage(name);
+        const existingConfigFiles =
+          fs.existsSync(configDir)
+            ? fs
+                .readdirSync(configDir)
+                .filter((f) => f.endsWith(".json"))
+                .map((f) => f.replace(".json", ""))
+            : [];
+        const declaredConfigFiles = manifest
+          ? Array.from(
+              new Set(
+                (manifest.fields || [])
+                  .map((field) => String(field.key || ""))
+                  .filter((key) => key.includes("."))
+                  .map((key) => key.split(".")[0]),
+              ),
+            )
+          : [];
+        const configFiles = Array.from(
+          new Set([...existingConfigFiles, ...declaredConfigFiles]),
+        );
+
+        return {
+          name,
+          title: manifest?.title || name,
+          description: manifest?.description,
+          hasPage: manifest?.hasCustomPage || false,
+          configFiles,
+        };
+      })
+      .filter((p) => p.hasPage);
+
+    return c.json({ ok: true, data: overview });
+  });
+
+  app.get("/:name/page", (c) => {
+    const name = c.req.param("name");
+    const manifest = loadServiceConfigPage(name);
+    const configs = getServiceConfigs(name);
+
+    if (!manifest) {
+      return c.json({ ok: true, data: null });
+    }
+
+    return c.json({
+      ok: true,
+      data: {
+        plugin: manifest.plugin,
+        title: manifest.title,
+        description: manifest.description,
+        markdown: manifest.markdown,
+        fields: manifest.fields,
+        hasCustomPage: manifest.hasCustomPage,
+        configs,
+      },
+    });
+  });
+
+  app.get("/:name", (c) => {
+    const name = c.req.param("name");
+    return c.json({ ok: true, data: getServiceConfigs(name) });
+  });
+
+  app.put("/:name/:config", async (c) => {
+    const serviceName = c.req.param("name");
+    const configName = c.req.param("config");
+    const body = await c.req.json();
+    updateServiceConfig(serviceName, configName, body);
     return c.json({ ok: true });
   });
 
