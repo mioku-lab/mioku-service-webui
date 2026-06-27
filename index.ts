@@ -30,6 +30,7 @@ import {
   createStrangerRoutes,
   createAccessControlRoutes,
 } from "./routes";
+import { freePort } from "./port-utils";
 
 export interface WebUIServiceAPI {
   getSettings(): WebUISettings;
@@ -44,7 +45,7 @@ class WebUIRuntime {
     logger.info(`[webui-action] ${action}${text}`);
   }
 
-  public initRoutes(): void {
+  public async initRoutes(): Promise<void> {
     const { upgradeWebSocket, injectWebSocket } = createNodeWebSocket({
       app: this.app,
     });
@@ -172,6 +173,12 @@ class WebUIRuntime {
     });
 
     const settings = getWebUISettings();
+    const freed = await freePort(settings.port);
+    if (freed.remainingPids.length > 0) {
+      throw new Error(
+        `webui 端口 ${settings.port} 被占用且无法结束 (PID: ${freed.remainingPids.join(", ")})`,
+      );
+    }
     const server = serve({
       fetch: this.app.fetch,
       port: settings.port,
@@ -232,7 +239,7 @@ const webUIService: MiokuService = {
     initBuiltinDatasources();
     ensureAuthConfig();
     await ensureWebUIDist();
-    runtime.initRoutes();
+    await runtime.initRoutes();
   },
 
   async dispose() {

@@ -514,7 +514,7 @@ export function createDataManagementRoutes() {
 
   app.post("/node-modules/refresh", async (c) => {
     const settings = getWebUISettings();
-    const command = getInstallCommand(settings.packageManager);
+    const command = getInstallCommand();
     const startedAt = Date.now();
     const result = await runCommand(command.cmd, command.args, process.cwd());
     const finishedAt = Date.now();

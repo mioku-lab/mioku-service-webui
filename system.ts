@@ -96,6 +96,66 @@ const BOOT_CONFIG_PATH = path.join(
   "base.json",
 );
 
+export interface BootSystemCommandsConfig {
+  update: {
+    enabled: boolean;
+    selectTimeoutMs: number;
+  };
+  install: {
+    enabled: boolean;
+  };
+  market: {
+    enabled: boolean;
+  };
+  restart: {
+    enabled: boolean;
+  };
+}
+
+const DEFAULT_BOOT_SYSTEM_COMMANDS_CONFIG: BootSystemCommandsConfig = {
+  update: {
+    enabled: true,
+    selectTimeoutMs: 60000,
+  },
+  install: {
+    enabled: true,
+  },
+  market: {
+    enabled: true,
+  },
+  restart: {
+    enabled: true,
+  },
+};
+
+function normalizeBootSystemCommandsConfig(
+  input: any,
+): BootSystemCommandsConfig {
+  const merged = deepMerge(
+    cloneJson(DEFAULT_BOOT_SYSTEM_COMMANDS_CONFIG),
+    input || {},
+  );
+  const rawTimeout = Number(merged?.update?.selectTimeoutMs);
+  return {
+    update: {
+      enabled: Boolean(merged?.update?.enabled),
+      selectTimeoutMs:
+        Number.isFinite(rawTimeout) && rawTimeout >= 1000
+          ? Math.floor(rawTimeout)
+          : DEFAULT_BOOT_SYSTEM_COMMANDS_CONFIG.update.selectTimeoutMs,
+    },
+    install: {
+      enabled: Boolean(merged?.install?.enabled),
+    },
+    market: {
+      enabled: Boolean(merged?.market?.enabled),
+    },
+    restart: {
+      enabled: Boolean(merged?.restart?.enabled),
+    },
+  };
+}
+
 interface AccessRuleConfig {
   whitelist: Array<string | number>;
   blacklist: Array<string | number>;
@@ -1345,8 +1405,7 @@ export async function getManagedPackageDetail(
   const missingServices = checkDependentServices(pkg);
 
   const isSystemPlugin = target === "plugin" ? isSystemPluginName(name) : false;
-  const isSystemService =
-    target === "service" ? isSystemServiceName(name) : false;
+  const isSystemService = false;
   return {
     ok: true,
     data: {

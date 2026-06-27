@@ -1,6 +1,6 @@
 {
   "name": "mioku-service-webui",
-  "version": "4.4.0",
+  "version": "4.4.1",
   "description": "Mioku WebUI 服务",
   "main": "index.ts",
   "type": "module",
