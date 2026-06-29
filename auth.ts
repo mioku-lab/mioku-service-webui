@@ -2,6 +2,16 @@ import * as crypto from "node:crypto";
 import type { Context, Next } from "hono";
 import type { AuthConfig } from "./types";
 import { AUTH_PATH, WEEK_MS, readJsonFile, writeJsonFile } from "./utils";
+import { notifyOwnersAuthTokenRefreshed } from "./system";
+
+function safeEqual(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(bufA, bufB);
+}
 
 export function ensureAuthConfig(): AuthConfig {
   const now = Date.now();
@@ -14,6 +24,10 @@ export function ensureAuthConfig(): AuthConfig {
       expiresAt: now + WEEK_MS,
     };
     writeJsonFile(AUTH_PATH, generated);
+    void notifyOwnersAuthTokenRefreshed(
+      generated.token,
+      generated.expiresAt,
+    ).catch(() => {});
     return generated;
   }
 
@@ -28,7 +42,7 @@ export function verifyAuthHeader(c: Context): boolean {
   }
 
   const authConfig = ensureAuthConfig();
-  return token === authConfig.token && Date.now() < authConfig.expiresAt;
+  return safeEqual(token, authConfig.token) && Date.now() < authConfig.expiresAt;
 }
 
 export async function requireAuth(c: Context, next: Next): Promise<Response | void> {
@@ -40,7 +54,7 @@ export async function requireAuth(c: Context, next: Next): Promise<Response | vo
 
 export function loginWithToken(inputToken: string): { ok: boolean; expiresAt?: number } {
   const authConfig = ensureAuthConfig();
-  if (inputToken !== authConfig.token) {
+  if (!safeEqual(inputToken, authConfig.token)) {
     return { ok: false };
   }
 

@@ -1814,6 +1814,57 @@ async function notifyOwnerWebUIDownloaded(version: string): Promise<void> {
   }
 }
 
+export async function notifyOwnersAuthTokenRefreshed(
+  token: string,
+  expiresAt: number,
+): Promise<void> {
+  const owners = getMiokuConfig()?.owners || [];
+  if (owners.length === 0) {
+    return;
+  }
+
+  const MAX_ATTEMPTS = 24;
+  const RETRY_INTERVAL_MS = 5000;
+
+  let bots: any[] = [];
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
+    bots = Array.from(connectedBots.values()).filter(Boolean);
+    if (bots.length > 0) {
+      break;
+    }
+    await sleep(RETRY_INTERVAL_MS);
+  }
+
+  if (bots.length === 0) {
+    logger.warn("[webui] 密钥已刷新，但暂无在线 Bot，未能通知主人");
+    return;
+  }
+
+  const bot = bots[0];
+  const settings = getWebUISettings();
+  const url = `http://${settings.host}:${settings.port}`;
+  const expireText = new Date(expiresAt).toLocaleString("zh-CN");
+  const message = [
+    "🔑 WebUI 鉴权密钥已更新",
+    `地址: ${url}`,
+    `新密钥: ${token}`,
+    `有效期至: ${expireText}`,
+  ].join("\n");
+
+  for (const ownerId of owners) {
+    try {
+      await bot.api("send_private_msg", {
+        user_id: Number(ownerId),
+        message,
+      });
+    } catch (err: any) {
+      logger.warn(
+        `[webui] 通知主人 ${ownerId} 密钥更新失败: ${err?.message || err}`,
+      );
+    }
+  }
+}
+
 export async function updateWebUIDistFromRelease(): Promise<
   Record<string, any>
 > {

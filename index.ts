@@ -61,6 +61,16 @@ class WebUIRuntime {
       );
     });
 
+    this.app.use("*", async (c, next) => {
+      await next();
+      c.header("X-Robots-Tag", "noindex, nofollow");
+    });
+
+    this.app.get("/robots.txt", (c) => {
+      c.header("content-type", "text/plain");
+      return c.body("User-agent: *\nDisallow: /\n");
+    });
+
     this.app.notFound((c) => {
       if (c.req.path.startsWith("/api/")) {
         return c.json({ ok: false, error: "API_NOT_FOUND" }, 404);

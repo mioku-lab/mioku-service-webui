@@ -36,7 +36,7 @@ export const BACKUP_DIR = path.join(process.cwd(), "backup");
 
 export const defaultWebUISettings: WebUISettings = {
   port: 3339,
-  host: "0.0.0.0",
+  host: "127.0.0.1",
   packageManager: "bun" as PackageManager,
 };
 
@@ -125,8 +125,32 @@ export function normalizePackageManager(): PackageManager {
 }
 
 export function isValidRepoUrl(url: string): boolean {
-  const gitLike = /^(https?:\/\/|git@|ssh:\/\/).+/;
-  return gitLike.test(url.trim());
+  const trimmed = url.trim();
+  // 拒绝空白字符：堵 `ssh://host -o ProxyCommand=...` 之类参数注入
+  if (!trimmed || /\s/.test(trimmed)) {
+    return false;
+  }
+
+  if (/^https?:\/\//.test(trimmed)) {
+    try {
+      const parsed = new URL(trimmed);
+      return Boolean(parsed.hostname) && !parsed.hostname.startsWith("-");
+    } catch {
+      return false;
+    }
+  }
+
+  const sshMatch = trimmed.match(/^ssh:\/\/(?:[^@/]+@)?([^/:]+)/);
+  if (sshMatch) {
+    return !sshMatch[1].startsWith("-");
+  }
+
+  const scpMatch = trimmed.match(/^git@([^:]+):.+/);
+  if (scpMatch) {
+    return !scpMatch[1].startsWith("-");
+  }
+
+  return false;
 }
 
 export function isNpmPackageName(name: string): boolean {

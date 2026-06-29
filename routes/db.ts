@@ -187,6 +187,18 @@ export function createPluginConfigRoutes() {
 export function createMemeRoutes() {
   const app = new Hono();
 
+  const memeRoot = path.resolve(CHAT_DATA_DIR, "meme");
+  const isInsideMeme = (target: string): boolean => {
+    const resolved = path.resolve(target);
+    return resolved === memeRoot || resolved.startsWith(`${memeRoot}${path.sep}`);
+  };
+  const isSafeSegment = (value: string): boolean =>
+    Boolean(value) &&
+    !value.includes("/") &&
+    !value.includes("\\") &&
+    value !== "." &&
+    value !== "..";
+
   app.get("/tree", (c) =>
     c.json({ ok: true, data: listMemeTree() }),
   );
@@ -200,11 +212,22 @@ export function createMemeRoutes() {
       return c.json({ ok: false, error: "FILE_REQUIRED" }, 400);
     }
 
-    const dir = path.join(CHAT_DATA_DIR, "meme", character, emotion);
-    fs.mkdirSync(dir, { recursive: true });
-
     const fileName = file.name || `upload-${Date.now()}.png`;
+    if (
+      !isSafeSegment(character) ||
+      !isSafeSegment(emotion) ||
+      !isSafeSegment(fileName)
+    ) {
+      return c.json({ ok: false, error: "INVALID_NAME" }, 400);
+    }
+
+    const dir = path.join(memeRoot, character, emotion);
     const filePath = path.join(dir, fileName);
+    if (!isInsideMeme(filePath)) {
+      return c.json({ ok: false, error: "INVALID_PATH" }, 400);
+    }
+
+    fs.mkdirSync(dir, { recursive: true });
     const buffer = Buffer.from(await file.arrayBuffer());
     fs.writeFileSync(filePath, buffer);
 
@@ -213,7 +236,10 @@ export function createMemeRoutes() {
 
   app.delete("/", async (c) => {
     const body = await c.req.json();
-    const filePath = path.join(process.cwd(), String(body.path || ""));
+    const filePath = path.resolve(process.cwd(), String(body.path || ""));
+    if (!isInsideMeme(filePath)) {
+      return c.json({ ok: false, error: "INVALID_PATH" }, 400);
+    }
     if (!fs.existsSync(filePath)) {
       return c.json({ ok: false, error: "NOT_FOUND" }, 404);
     }
