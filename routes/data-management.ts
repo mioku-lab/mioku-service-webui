@@ -122,15 +122,14 @@ function resolveBackupFile(name: string): string {
   return fullPath;
 }
 
-async function pathSize(target: string): Promise<SizeResult> {
+async function pathSize(
+  target: string,
+  visited: Set<string> = new Set(),
+): Promise<SizeResult> {
   let stat: fs.Stats;
   try {
-    stat = await fs.promises.lstat(target);
+    stat = await fs.promises.stat(target);
   } catch {
-    return { size: 0, files: 0, directories: 0 };
-  }
-
-  if (stat.isSymbolicLink()) {
     return { size: 0, files: 0, directories: 0 };
   }
 
@@ -138,9 +137,23 @@ async function pathSize(target: string): Promise<SizeResult> {
     return { size: stat.size, files: 1, directories: 0 };
   }
 
+  // Follow symlinks to their real target. In a bun workspace, node_modules
+  // entries are symlinks into packages/* — skipping them reported 0B. Guard
+  // against cycles / repeated targets via realpath.
+  let real: string;
+  try {
+    real = await fs.promises.realpath(target);
+  } catch {
+    return { size: 0, files: 0, directories: 0 };
+  }
+  if (visited.has(real)) {
+    return { size: 0, files: 0, directories: 0 };
+  }
+  visited.add(real);
+
   const entries = await fs.promises.readdir(target).catch(() => []);
   const results = await Promise.all(
-    entries.map((entry) => pathSize(path.join(target, entry))),
+    entries.map((entry) => pathSize(path.join(target, entry), visited)),
   );
   return results.reduce<SizeResult>(
     (total, item) => ({

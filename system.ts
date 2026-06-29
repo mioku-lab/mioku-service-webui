@@ -625,10 +625,10 @@ function readInstalledWebUIVersion(): string {
     }
   }
 
-  // Fallback: read from mioku-webui package.json directly
-  // mioku-webui is at repo root, which is ../../ from packages/mioku-service-webui
-  // but since service runs from example/, we need example/../../mioku-webui
-  const webuiProjectDir = path.join(process.cwd(), "..", "..", "mioku-webui");
+  // Fallback: read from mioku-webui package.json directly.
+  // The service runs from example/, so mioku-webui at the repo root is one
+  // level up — same resolution as resolveWebUIProjectDir().
+  const webuiProjectDir = resolveWebUIProjectDir();
   const webuiPkgPath = path.join(webuiProjectDir, "package.json");
   if (fs.existsSync(webuiPkgPath)) {
     const pkg = readPackageJson(webuiProjectDir);
@@ -1688,7 +1688,12 @@ async function fetchLatestMiokuUpdate(
   const job = (async () => {
     const cwd = process.cwd();
     const rootPkg = readRootPackageJson() || {};
-    const currentVersion = normalizeVersionSpec(rootPkg?.version || "unknown");
+    // example/package.json has no version field; read the installed mioku
+    // package so the current version matches what the dashboard reports.
+    const miokuPkg = readMiokuPackageJson();
+    const currentVersion = normalizeVersionSpec(
+      miokuPkg?.version || rootPkg?.version || "unknown",
+    );
 
     // Get latest version from npm registry
     let latestVersion = currentVersion;
