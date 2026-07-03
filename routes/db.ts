@@ -306,10 +306,10 @@ export function createServiceConfigRoutes() {
     return c.json({ ok: true, data: overview });
   });
 
-  app.get("/:name/page", (c) => {
+  app.get("/:name/page", async (c) => {
     const name = c.req.param("name");
     const manifest = loadServiceConfigPage(name);
-    const configs = getServiceConfigs(name);
+    const configs = await getServiceConfigs(name);
 
     if (!manifest) {
       return c.json({ ok: true, data: null });
@@ -329,16 +329,16 @@ export function createServiceConfigRoutes() {
     });
   });
 
-  app.get("/:name", (c) => {
+  app.get("/:name", async (c) => {
     const name = c.req.param("name");
-    return c.json({ ok: true, data: getServiceConfigs(name) });
+    return c.json({ ok: true, data: await getServiceConfigs(name) });
   });
 
   app.put("/:name/:config", async (c) => {
     const serviceName = c.req.param("name");
     const configName = c.req.param("config");
     const body = await c.req.json();
-    updateServiceConfig(serviceName, configName, body);
+    await updateServiceConfig(serviceName, configName, body);
     return c.json({ ok: true });
   });
 
