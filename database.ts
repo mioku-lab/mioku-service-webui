@@ -5,6 +5,14 @@ import { CHAT_DATA_DIR, readJsonFile, writeJsonFile } from "./utils";
 
 const DB_PATH = path.join(CHAT_DATA_DIR, "chat.db");
 const SAFE_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const STICKER_FILE_PATTERN = /\.(png|jpg|jpeg|gif|webp)$/i;
+
+export interface StickerCatalogItem {
+  id: string;
+  character: string;
+  label: string;
+  url: string;
+}
 
 function openDb(): any {
   if (!fs.existsSync(DB_PATH)) {
@@ -297,6 +305,40 @@ export function listMemeTree(): Record<string, Record<string, string[]>> {
   }
 
   return tree;
+}
+
+export function listStickerCatalog(): StickerCatalogItem[] {
+  const root = path.join(CHAT_DATA_DIR, "meme");
+  if (!fs.existsSync(root)) return [];
+
+  const items: StickerCatalogItem[] = [];
+  const visit = (dir: string, character: string) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const entryPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        visit(entryPath, character);
+        continue;
+      }
+      if (!entry.isFile() || !STICKER_FILE_PATTERN.test(entry.name)) continue;
+
+      const id = path.relative(root, entryPath).split(path.sep).join("/");
+      const label = path
+        .basename(entry.name, path.extname(entry.name))
+        .replace(/[_-]+/g, " ")
+        .trim();
+      const url = `/meme/${id
+        .split("/")
+        .map((segment) => encodeURIComponent(segment))
+        .join("/")}`;
+      items.push({ id, character, label, url });
+    }
+  };
+
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+    if (entry.isDirectory()) visit(path.join(root, entry.name), entry.name);
+  }
+
+  return items.sort((a, b) => a.id.localeCompare(b.id));
 }
 
 export function savePluginConfig(pluginName: string, fileName: string, value: any): void {

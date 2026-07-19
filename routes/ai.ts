@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { logger } from "mioki";
 import { getChatConfig, updateChatConfig } from "../system";
+import { listStickerCatalog } from "../database";
 import aiService from "mioku-service-ai";
 import type { AIUsageRange } from "mioku-service-ai/usage/types";
 
@@ -96,6 +97,28 @@ function normalizePersonalizationConfig(input: any): any {
   delete rawExpression.maxExpressions;
 
   data.expression = rawExpression;
+
+  const rawEmoji =
+    data.emoji && typeof data.emoji === "object" && !Array.isArray(data.emoji)
+      ? { ...data.emoji }
+      : {};
+  rawEmoji.enabled =
+    typeof rawEmoji.enabled === "boolean" ? rawEmoji.enabled : true;
+  rawEmoji.characters = Array.isArray(rawEmoji.characters)
+    ? rawEmoji.characters
+        .map(String)
+        .map((value: string) => value.trim())
+        .filter(Boolean)
+    : [];
+  rawEmoji.stickers = Array.isArray(rawEmoji.stickers)
+    ? rawEmoji.stickers
+        .map(String)
+        .map((value: string) => value.trim())
+        .filter(Boolean)
+    : [];
+  delete rawEmoji.useAISelection;
+  data.emoji = rawEmoji;
+
   return data;
 }
 
@@ -188,6 +211,10 @@ export function createAIRoutes() {
       },
     });
   });
+
+  app.get("/stickers", (c) =>
+    c.json({ ok: true, data: listStickerCatalog() }),
+  );
 
   app.get("/usage", (c) => {
     if (!aiService?.api?.getUsageSummary) {
