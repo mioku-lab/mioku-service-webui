@@ -300,7 +300,9 @@ export function listMemeTree(): Record<string, Record<string, string[]>> {
       tree[character][emotion] = fs
         .readdirSync(emotionDir)
         .filter((name) => /\.(png|jpg|jpeg|gif|webp)$/i.test(name))
-        .map((name) => path.join("data", "chat", "meme", character, emotion, name));
+        .map((name) =>
+          path.posix.join("data", "chat", "meme", character, emotion, name),
+        );
     }
   }
 

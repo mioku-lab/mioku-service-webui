@@ -1,13 +1,13 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawn } from "node:child_process";
 import type { PackageManager, WebUISettings } from "./types";
 import {
   getServiceConfigDir,
   getServiceDataDir,
   getConfigDir,
   getDataDir,
+  runCommand as runMiokuCommand,
 } from "mioku";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -86,34 +86,7 @@ export async function runCommand(
   args: string[],
   cwd: string,
 ): Promise<{ stdout: string; stderr: string; code: number }> {
-  return new Promise((resolve) => {
-    const child = spawn(command, args, {
-      cwd,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    let stdout = "";
-    let stderr = "";
-
-    child.stdout.on("data", (chunk) => {
-      stdout += String(chunk);
-    });
-
-    child.stderr.on("data", (chunk) => {
-      stderr += String(chunk);
-    });
-
-    child.on("close", (code) => {
-      resolve({ stdout, stderr, code: code ?? 1 });
-    });
-
-    child.on("error", (error) => {
-      resolve({
-        stdout,
-        stderr: `${stderr}\n${error.message}`.trim(),
-        code: 1,
-      });
-    });
-  });
+  return runMiokuCommand(command, args, { cwd });
 }
 
 export function getInstallCommand(): { cmd: string; args: string[] } {

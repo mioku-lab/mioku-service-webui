@@ -231,7 +231,10 @@ export function createMemeRoutes() {
     const buffer = Buffer.from(await file.arrayBuffer());
     fs.writeFileSync(filePath, buffer);
 
-    return c.json({ ok: true, path: path.relative(process.cwd(), filePath) });
+    return c.json({
+      ok: true,
+      path: path.relative(process.cwd(), filePath).split(path.sep).join("/"),
+    });
   });
 
   app.delete("/", async (c) => {

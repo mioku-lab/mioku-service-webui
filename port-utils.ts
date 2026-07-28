@@ -41,9 +41,33 @@ function parsePids(raw: string): number[] {
   return Array.from(pids);
 }
 
+function parseNetstatPids(raw: string, port: number): number[] {
+  const pids = new Set<number>();
+  for (const line of raw.split(/\r?\n/)) {
+    const cols = line.trim().split(/\s+/);
+    if (cols.length < 5 || cols[0].toUpperCase() !== "TCP") continue;
+    if (!/^LISTENING$/i.test(cols[3])) continue;
+    // Local address is host:port — IPv6 forms look like [::]:3339.
+    const localPort = cols[1].slice(cols[1].lastIndexOf(":") + 1);
+    if (Number(localPort) !== port) continue;
+    const pid = Number(cols[4]);
+    if (Number.isInteger(pid) && pid > 0) pids.add(pid);
+  }
+  return Array.from(pids);
+}
+
 async function listListeningPids(
   port: number,
 ): Promise<{ pids: number[]; lsofAvailable: boolean }> {
+  if (process.platform === "win32") {
+    try {
+      const { stdout } = await execFileAsync("netstat", ["-ano", "-p", "TCP"]);
+      return { pids: parseNetstatPids(stdout, port), lsofAvailable: true };
+    } catch (err: any) {
+      return { pids: [], lsofAvailable: err?.code !== "ENOENT" };
+    }
+  }
+
   try {
     const { stdout } = await execFileAsync("lsof", [
       "-nP",
@@ -84,8 +108,9 @@ export async function freePort(
   const initial = await listListeningPids(port);
 
   if (!initial.lsofAvailable) {
+    const missing = process.platform === "win32" ? "netstat" : "lsof";
     log.warn(
-      `未检测到 lsof 命令，无法定位端口 ${port} 的占用进程，建议安装 lsof`,
+      `未检测到 ${missing} 命令，无法定位端口 ${port} 的占用进程，建议安装 ${missing}`,
     );
     return {
       port,

@@ -33,7 +33,7 @@ import {
   WEBUI_DIST,
   writeJsonFile,
 } from "./utils";
-import { spawn } from "node:child_process";
+import * as fsp from "node:fs/promises";
 
 async function fetchJson(url: string): Promise<any> {
   const res = await fetch(url, {
@@ -551,44 +551,6 @@ function getRepositoryFromPackage(pkg: any): string {
   if (typeof repository === "string") return repository;
   if (typeof repository?.url === "string") return repository.url;
   return "";
-}
-
-async function commandExists(cmd: string): Promise<boolean> {
-  const result = await runCommand("which", [cmd], process.cwd());
-  return result.code === 0;
-}
-
-async function ensureUnzipCommand(): Promise<void> {
-  if (await commandExists("unzip")) {
-    return;
-  }
-
-  const platform = os.platform();
-  if (platform === "darwin") {
-    const installRes = await runCommand(
-      "brew",
-      ["install", "unzip"],
-      process.cwd(),
-    );
-    if (installRes.code !== 0) {
-      throw new Error(
-        `未找到 unzip 且自动安装失败: ${installRes.stderr || installRes.stdout}。\n` +
-          `请手动运行: brew install unzip`,
-      );
-    }
-  } else {
-    const installRes = await runCommand(
-      "sudo",
-      ["apt", "install", "-y", "unzip"],
-      process.cwd(),
-    );
-    if (installRes.code !== 0) {
-      throw new Error(
-        `未找到 unzip 且自动安装失败: ${installRes.stderr || installRes.stdout}。\n` +
-          `请手动运行: sudo apt install unzip`,
-      );
-    }
-  }
 }
 
 async function getGitOriginUrl(dir: string): Promise<string> {
@@ -1912,58 +1874,31 @@ export async function updateWebUIDistFromRelease(): Promise<
     try {
       logger.info(`[webui] 正在下载 WebUI dist...`);
 
-      await new Promise<void>((resolve, reject) => {
-        const curl = spawn(
-          "curl",
-          [
-            "-L",
-            "-o",
-            zipPath,
-            "-A",
-            "mioku-webui-updater/1.0",
-            "--silent",
-            "--show-error",
-            downloadUrl,
-          ],
-          {
-            stdio: ["ignore", "pipe", "pipe"],
-          },
-        );
-
-        let stderr = "";
-        curl.stderr.on("data", (chunk) => {
-          stderr += String(chunk);
-        });
-
-        curl.on("close", (code) => {
-          if (code === 0) {
-            resolve();
-          } else {
-            reject(new Error(`curl 下载失败 (code ${code}): ${stderr}`));
-          }
-        });
-
-        curl.on("error", (err) => {
-          reject(new Error(`curl 进程异常: ${err.message}`));
-        });
-
-        // Periodically log progress by checking file size
-        const progressTimer = setInterval(() => {
-          if (fs.existsSync(zipPath)) {
-            const stat = fs.statSync(zipPath);
-            const now = Date.now();
-            if (now - lastLogTime >= LOG_INTERVAL_MS) {
-              logger.info(
-                `[webui] 正在下载 WebUI dist... ${(stat.size / 1024 / 1024).toFixed(1)} MB 已下载`,
-              );
-              lastLogTime = now;
-            }
-          }
-        }, 1000);
-
-        // Clear timer when done
-        curl.on("close", () => clearInterval(progressTimer));
+      const res = await fetch(downloadUrl, {
+        headers: { "User-Agent": "mioku-webui-updater/1.0" },
+        redirect: "follow",
       });
+      if (!res.ok || !res.body) {
+        throw new Error(`下载失败: HTTP ${res.status}`);
+      }
+
+      let downloaded = 0;
+      const handle = await fsp.open(zipPath, "w");
+      try {
+        for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
+          await handle.write(chunk);
+          downloaded += chunk.byteLength;
+          const now = Date.now();
+          if (now - lastLogTime >= LOG_INTERVAL_MS) {
+            logger.info(
+              `[webui] 正在下载 WebUI dist... ${(downloaded / 1024 / 1024).toFixed(1)} MB 已下载`,
+            );
+            lastLogTime = now;
+          }
+        }
+      } finally {
+        await handle.close();
+      }
 
       const zipStat = fs.statSync(zipPath);
       logger.info(
