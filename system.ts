@@ -1213,9 +1213,46 @@ export async function removeManagedPackage(
     throw new Error("系统服务不可卸载");
   }
 
-  const dir = resolveManagedDir(input.target, input.name);
+  // construct full package name from short name
+  const fullName = input.name.startsWith("mioku-plugin-") || input.name.startsWith("mioku-service-")
+    ? input.name
+    : input.target === "plugin"
+      ? `mioku-plugin-${input.name}`
+      : `mioku-service-${input.name}`;
 
-  fs.rmSync(dir, { recursive: true, force: true });
+  const installCmd = getInstallCommand();
+  const removeArgs = installCmd.args.map((a) =>
+    a === "add" ? "remove" : a,
+  );
+
+  const result = await runCommand(
+    installCmd.cmd,
+    [...removeArgs, fullName],
+    process.cwd(),
+  );
+
+  if (result.code !== 0) {
+    throw new Error(`bun remove 失败: ${result.stderr || result.stdout}`);
+  }
+
+  // clean up mioki.plugins list for plugins
+  if (input.target === "plugin") {
+    const pkgPath = ROOT_PACKAGE_PATH;
+    if (fs.existsSync(pkgPath)) {
+      try {
+        const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
+        const mioki = pkg.mioki ?? {};
+        const plugins: string[] = Array.isArray(mioki.plugins) ? mioki.plugins : [];
+        const shortName = fullName.replace(/^mioku-plugin-/, "");
+        if (plugins.includes(shortName)) {
+          pkg.mioki = { ...mioki, plugins: plugins.filter((p: string) => p !== shortName) };
+          fs.writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
+        }
+      } catch {
+        // silently ignore package.json parse errors
+      }
+    }
+  }
 
   managedPackageUpdateCache.delete(
     makeManagedUpdateCacheKey(input.target, input.name),
@@ -2348,4 +2385,54 @@ export function getAvailablePlugins(): string[] {
     plugins.push(entry.name.replace(/^mioku-plugin-/, ""));
   }
   return plugins.sort((a, b) => a.localeCompare(b));
+}
+
+export interface PluginStatusItem {
+  name: string;
+  enabled: boolean;
+  system: boolean;
+  description: string;
+}
+
+export function getPluginStatusList(): PluginStatusItem[] {
+  const allPlugins = getAvailablePlugins();
+  const miokuConfig = getMiokuConfig();
+  const enabledPlugins = new Set(miokuConfig.plugins || []);
+
+  return allPlugins.map((name) => {
+    const fullPath = path.join(NODE_MODULES_DIR, `mioku-plugin-${name}`);
+    const pkg = readPackageJson(fullPath);
+    return {
+      name,
+      enabled: enabledPlugins.has(name),
+      system: SYSTEM_PLUGIN_NAMES.has(name.toLowerCase()),
+      description: pkg?.description ?? "",
+    };
+  });
+}
+
+export function togglePlugin(name: string, enabled: boolean): PluginStatusItem {
+  const safeName = String(name || "").trim();
+  if (!safeName) throw new Error("插件名称为空");
+
+  const config = getMiokuConfig();
+  const plugins = new Set(config.plugins || []);
+
+  if (enabled) {
+    plugins.add(safeName);
+  } else {
+    if (safeName.toLowerCase() === "boot") {
+      throw new Error("boot 插件不可关闭");
+    }
+    plugins.delete(safeName);
+  }
+
+  updateMiokuConfig({ ...config, plugins: Array.from(plugins) });
+
+  return {
+    name: safeName,
+    enabled: plugins.has(safeName),
+    system: SYSTEM_PLUGIN_NAMES.has(safeName.toLowerCase()),
+    description: "",
+  };
 }

@@ -4,6 +4,8 @@ import {
   getMiokuConfig,
   updateMiokuConfig,
   getAvailablePlugins,
+  getPluginStatusList,
+  togglePlugin,
   checkMiokuReleaseUpdate,
   updateMiokuFromMain,
 } from "../system";
@@ -45,6 +47,21 @@ export function createConfigRoutes() {
 
   app.get("/plugins/available", (c) => {
     const data = getAvailablePlugins();
+    return c.json({ ok: true, data });
+  });
+
+  app.get("/plugins", (c) => {
+    const data = getPluginStatusList();
+    return c.json({ ok: true, data });
+  });
+
+  app.post("/plugins/toggle", async (c) => {
+    const body = (await c.req.json()) as { name: string; enabled: boolean };
+    const data = togglePlugin(body.name, body.enabled);
+    logger.info(`[webui-action] config.plugins.toggle`, {
+      name: body.name,
+      enabled: body.enabled,
+    });
     return c.json({ ok: true, data });
   });
 
