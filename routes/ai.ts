@@ -354,6 +354,38 @@ export function createAIRoutes() {
     return c.json({ ok: true, data: api.getRoleBindings() });
   });
 
+  app.get("/fallback", (c) => {
+    const api = getAIApi();
+    const chain = api?.getMainFallbackChain?.() ?? [];
+    return c.json({
+      ok: true,
+      data: {
+        fallback: chain,
+        liveFallback: chain,
+      },
+    });
+  });
+
+  app.put("/fallback", async (c) => {
+    const api = getAIApi();
+    if (!api?.setMainFallbackChain) {
+      return c.json({ ok: false, error: "AI_SERVICE_UNAVAILABLE" }, 503);
+    }
+    const body = await c.req.json();
+    const raw = Array.isArray(body?.fallback) ? body.fallback : [];
+    const fallback = Array.from(
+      new Set(
+        raw
+          .map((id: unknown) => String(id || "").trim())
+          .filter((id: string) => id.includes("/") && id.length > 1),
+      ),
+    );
+    logger.info(`[webui-action] ai.fallback.update`, { count: fallback.length });
+    api.setMainFallbackChain(fallback);
+    const live = api.getMainFallbackChain?.() ?? fallback;
+    return c.json({ ok: true, data: { fallback: live, liveFallback: live } });
+  });
+
   app.put("/roles", async (c) => {
     const api = getAIApi();
     if (!api?.setRoleBinding) {
