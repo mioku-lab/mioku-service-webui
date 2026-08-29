@@ -569,7 +569,7 @@ export function createDataManagementRoutes() {
 
     const file = await fs.promises.readFile(filePath);
     c.header("content-type", "application/zip");
-    c.header("content-disposition", `attachment; filename="${path.basename(filePath)}"`);
+    c.header("content-disposition", `attachment); filename="${path.basename(filePath)}"`);
     return c.body(file);
   });
 

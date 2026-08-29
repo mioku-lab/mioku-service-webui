@@ -19,6 +19,7 @@ interface OfficialServiceEntry {
 interface OfficialRegistry {
   plugins?: Record<string, OfficialPluginEntry>;
   services?: Record<string, OfficialServiceEntry>;
+  adapters?: Record<string, OfficialPluginEntry>;
 }
 
 let cachedOfficialRegistry: OfficialRegistry | null = null;
@@ -56,9 +57,11 @@ async function readOfficialRegistry(force = false): Promise<OfficialRegistry> {
 function buildOfficialMaps(registry: OfficialRegistry): {
   plugins: Map<string, OfficialPluginEntry>;
   services: Map<string, OfficialServiceEntry>;
+  adapters: Map<string, OfficialPluginEntry>;
 } {
   const plugins = new Map<string, OfficialPluginEntry>();
   const services = new Map<string, OfficialServiceEntry>();
+  const adapters = new Map<string, OfficialPluginEntry>();
 
   for (const [, entry] of Object.entries(registry.plugins || {})) {
     if (entry?.npm) {
@@ -72,21 +75,25 @@ function buildOfficialMaps(registry: OfficialRegistry): {
     }
   }
 
-  return { plugins, services };
+  for (const [, entry] of Object.entries(registry.adapters || {})) {
+    if (entry?.npm) {
+      adapters.set(entry.npm, entry);
+    }
+  }
+
+  return { plugins, services, adapters };
 }
 
-function isServicePackage(name: string): boolean {
-  return name.startsWith("mioku-service-");
-}
-
-function inferTypeFromPackageName(name: string): "plugin" | "service" | null {
+function inferTypeFromPackageName(name: string): "plugin" | "service" | "adapter" | null {
   if (name.startsWith("mioku-plugin-")) return "plugin";
   if (name.startsWith("mioku-service-")) return "service";
+  if (name.startsWith("mioku-adapter-")) return "adapter";
   return null;
 }
 
-function inferDisplayName(packageName: string, type: "plugin" | "service"): string {
-  const prefix = type === "plugin" ? "mioku-plugin-" : "mioku-service-";
+function inferDisplayName(packageName: string, type: "plugin" | "service" | "adapter"): string {
+  const prefix =
+    type === "plugin" ? "mioku-plugin-" : type === "service" ? "mioku-service-" : "mioku-adapter-";
   return packageName.startsWith(prefix)
     ? packageName.slice(prefix.length)
     : packageName;
@@ -189,7 +196,9 @@ export function createStoreRoutes() {
       const officialEntry =
         type === "plugin"
           ? officialMaps.plugins.get(packageName)
-          : officialMaps.services.get(packageName);
+          : type === "service"
+            ? officialMaps.services.get(packageName)
+            : officialMaps.adapters.get(packageName);
       const repositoryUrl = normalizeRepositoryUrl(latest?.repository);
 
       return c.json({
@@ -213,11 +222,13 @@ export function createStoreRoutes() {
           requiredServices: Array.isArray(latest?.mioku?.services)
             ? latest.mioku.services
             : [],
-          installTarget: isServicePackage(packageName) ? "service" : "plugin",
+          installTarget: type,
           installPath:
             type === "plugin"
               ? `plugins/${inferDisplayName(packageName, "plugin")}`
-              : getServiceInstallPath(latest, packageName),
+              : type === "service"
+                ? getServiceInstallPath(latest, packageName)
+                : `adapters/${inferDisplayName(packageName, "adapter")}`,
         },
       });
     } catch (error: any) {

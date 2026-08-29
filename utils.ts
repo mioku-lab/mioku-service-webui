@@ -133,9 +133,14 @@ export function isNpmPackageName(name: string): boolean {
 
 export function resolveNpmPackageName(
   name: string,
-  target: "plugin" | "service",
+  target: "plugin" | "service" | "adapter",
 ): string {
-  const prefix = target === "plugin" ? "mioku-plugin-" : "mioku-service-";
+  const prefix =
+    target === "plugin"
+      ? "mioku-plugin-"
+      : target === "service"
+        ? "mioku-service-"
+        : "mioku-adapter-";
   if (name.startsWith(prefix)) {
     return name;
   }

@@ -3,7 +3,9 @@ import * as os from "node:os";
 import * as path from "node:path";
 import process from "node:process";
 import AdmZip from "adm-zip";
-import { connectedBots, logger, systemInfo } from "mioki";
+import systemInfo from "systeminformation";
+import {connectedBots,
+  logger} from "mioku";
 import type {
   InstallRequest,
   ManagedTarget,
@@ -87,81 +89,16 @@ interface MiokiRuntimeConfig {
   [key: string]: any;
 }
 
-const SYSTEM_PLUGIN_NAMES = new Set(["boot", "chat", "help"]);
+const SYSTEM_PLUGIN_NAMES = new Set(["chat", "help"]);
 const SYSTEM_SERVICE_NAMES = new Set(["ai", "config", "help", "screenshot"]);
-const BOOT_CONFIG_PATH = path.join(
+const CORE_CONFIG_PATH = path.join(
   process.cwd(),
   "config",
-  "boot",
+  "core",
   "base.json",
 );
 
-export interface BootSystemCommandsConfig {
-  update: {
-    enabled: boolean;
-    selectTimeoutMs: number;
-  };
-  install: {
-    enabled: boolean;
-  };
-  market: {
-    enabled: boolean;
-  };
-  restart: {
-    enabled: boolean;
-  };
-}
-
-const DEFAULT_BOOT_SYSTEM_COMMANDS_CONFIG: BootSystemCommandsConfig = {
-  update: {
-    enabled: true,
-    selectTimeoutMs: 60000,
-  },
-  install: {
-    enabled: true,
-  },
-  market: {
-    enabled: true,
-  },
-  restart: {
-    enabled: true,
-  },
-};
-
-function normalizeBootSystemCommandsConfig(
-  input: any,
-): BootSystemCommandsConfig {
-  const merged = deepMerge(
-    cloneJson(DEFAULT_BOOT_SYSTEM_COMMANDS_CONFIG),
-    input || {},
-  );
-  const rawTimeout = Number(merged?.update?.selectTimeoutMs);
-  return {
-    update: {
-      enabled: Boolean(merged?.update?.enabled),
-      selectTimeoutMs:
-        Number.isFinite(rawTimeout) && rawTimeout >= 1000
-          ? Math.floor(rawTimeout)
-          : DEFAULT_BOOT_SYSTEM_COMMANDS_CONFIG.update.selectTimeoutMs,
-    },
-    install: {
-      enabled: Boolean(merged?.install?.enabled),
-    },
-    market: {
-      enabled: Boolean(merged?.market?.enabled),
-    },
-    restart: {
-      enabled: Boolean(merged?.restart?.enabled),
-    },
-  };
-}
-
-interface AccessRuleConfig {
-  whitelist: Array<string | number>;
-  blacklist: Array<string | number>;
-}
-
-export interface BootSystemConfig {
+export interface CoreSystemConfig {
   likeCommand: {
     enabled: boolean;
     keyword: string;
@@ -173,47 +110,31 @@ export interface BootSystemConfig {
   };
   group: {
     minMemberCount: number;
-    welcome: {
-      enabled: boolean;
-      mode: "ai" | "text";
-      text: string;
-      aiPrompt: string;
-    };
   };
-  messageFilter: {
-    user: AccessRuleConfig;
-    group: AccessRuleConfig;
+  autoUpdate: {
+    enabled: boolean;
+    time: string;
+    frequency: "daily" | "weekly" | "monthly";
   };
 }
 
-const DEFAULT_BOOT_SYSTEM_CONFIG: BootSystemConfig = {
+const DEFAULT_CORE_SYSTEM_CONFIG: CoreSystemConfig = {
   likeCommand: {
     enabled: true,
     keyword: "赞我",
     likeTimes: 10,
-    reactionEmojiId: 66,
+    reactionEmojiId: 201,
   },
   friend: {
-    autoApprove: false,
+    autoApprove: true,
   },
   group: {
     minMemberCount: 0,
-    welcome: {
-      enabled: true,
-      mode: "ai",
-      text: "欢迎 {user} 加入 {group}",
-      aiPrompt: "",
-    },
   },
-  messageFilter: {
-    user: {
-      whitelist: [],
-      blacklist: [],
-    },
-    group: {
-      whitelist: [],
-      blacklist: [],
-    },
+  autoUpdate: {
+    enabled: true,
+    time: "03:00",
+    frequency: "daily",
   },
 };
 
@@ -238,7 +159,9 @@ function isSystemServiceName(name: string): boolean {
 }
 
 function getTargetRoot(target: ManagedTarget): string {
-  return target === "plugin" ? PLUGINS_DIR : SERVICES_DIR;
+  if (target === "plugin") return PLUGINS_DIR;
+  if (target === "service") return SERVICES_DIR;
+  return NODE_MODULES_DIR;
 }
 
 async function getCurrentBranchName(dir: string): Promise<string> {
@@ -310,17 +233,11 @@ function cloneJson<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
-function normalizeAccessRuleConfig(input: any): AccessRuleConfig {
-  return {
-    whitelist: Array.isArray(input?.whitelist) ? input.whitelist : [],
-    blacklist: Array.isArray(input?.blacklist) ? input.blacklist : [],
-  };
-}
-
-function normalizeBootSystemConfig(input: any): BootSystemConfig {
-  const merged = deepMerge(cloneJson(DEFAULT_BOOT_SYSTEM_CONFIG), input || {});
-  const legacyPrivateFilter = input?.messageFilter?.private;
-  const userFilterSource = input?.messageFilter?.user ?? legacyPrivateFilter;
+function normalizeCoreSystemConfig(input: any): CoreSystemConfig {
+  const merged = deepMerge(cloneJson(DEFAULT_CORE_SYSTEM_CONFIG), input || {});
+  const validFreq = ["daily", "weekly", "monthly"].includes(
+    merged?.autoUpdate?.frequency,
+  );
 
   return {
     likeCommand: {
@@ -329,17 +246,17 @@ function normalizeBootSystemConfig(input: any): BootSystemConfig {
         typeof merged?.likeCommand?.keyword === "string" &&
         merged.likeCommand.keyword.trim()
           ? merged.likeCommand.keyword.trim()
-          : DEFAULT_BOOT_SYSTEM_CONFIG.likeCommand.keyword,
+          : DEFAULT_CORE_SYSTEM_CONFIG.likeCommand.keyword,
       likeTimes:
         typeof merged?.likeCommand?.likeTimes === "number" &&
         Number.isFinite(merged.likeCommand.likeTimes)
           ? merged.likeCommand.likeTimes
-          : DEFAULT_BOOT_SYSTEM_CONFIG.likeCommand.likeTimes,
+          : DEFAULT_CORE_SYSTEM_CONFIG.likeCommand.likeTimes,
       reactionEmojiId:
         typeof merged?.likeCommand?.reactionEmojiId === "number" &&
         Number.isFinite(merged.likeCommand.reactionEmojiId)
           ? merged.likeCommand.reactionEmojiId
-          : DEFAULT_BOOT_SYSTEM_CONFIG.likeCommand.reactionEmojiId,
+          : DEFAULT_CORE_SYSTEM_CONFIG.likeCommand.reactionEmojiId,
     },
     friend: {
       autoApprove: Boolean(merged?.friend?.autoApprove),
@@ -349,23 +266,18 @@ function normalizeBootSystemConfig(input: any): BootSystemConfig {
         typeof merged?.group?.minMemberCount === "number" &&
         Number.isFinite(merged.group.minMemberCount)
           ? merged.group.minMemberCount
-          : DEFAULT_BOOT_SYSTEM_CONFIG.group.minMemberCount,
-      welcome: {
-        enabled: Boolean(merged?.group?.welcome?.enabled),
-        mode: merged?.group?.welcome?.mode === "text" ? "text" : "ai",
-        text:
-          typeof merged?.group?.welcome?.text === "string"
-            ? merged.group.welcome.text
-            : DEFAULT_BOOT_SYSTEM_CONFIG.group.welcome.text,
-        aiPrompt:
-          typeof merged?.group?.welcome?.aiPrompt === "string"
-            ? merged.group.welcome.aiPrompt
-            : DEFAULT_BOOT_SYSTEM_CONFIG.group.welcome.aiPrompt,
-      },
+          : DEFAULT_CORE_SYSTEM_CONFIG.group.minMemberCount,
     },
-    messageFilter: {
-      user: normalizeAccessRuleConfig(userFilterSource),
-      group: normalizeAccessRuleConfig(merged?.messageFilter?.group),
+    autoUpdate: {
+      enabled: Boolean(merged?.autoUpdate?.enabled),
+      time:
+        typeof merged?.autoUpdate?.time === "string" &&
+        merged.autoUpdate.time.trim()
+          ? merged.autoUpdate.time.trim()
+          : DEFAULT_CORE_SYSTEM_CONFIG.autoUpdate.time,
+      frequency: validFreq
+        ? merged.autoUpdate.frequency
+        : DEFAULT_CORE_SYSTEM_CONFIG.autoUpdate.frequency,
     },
   };
 }
@@ -408,8 +320,8 @@ function readRootPackageJson(): any {
 
 function readMiokiPackageJson(): any | null {
   const candidates = [
-    path.join(process.cwd(), "node_modules", "mioki", "package.json"),
-    path.join(process.cwd(), "..", "node_modules", "mioki", "package.json"),
+    path.join(process.cwd(), "node_modules", "mioku", "package.json"),
+    path.join(process.cwd(), "..", "node_modules", "mioku", "package.json"),
   ];
   for (const candidate of candidates) {
     if (fs.existsSync(candidate)) {
@@ -484,20 +396,20 @@ export function updateWebUISettings(
   return next;
 }
 
-export function getBootSystemConfig(): BootSystemConfig {
-  ensureDir(path.dirname(BOOT_CONFIG_PATH));
-  const raw = readJsonFile<any>(BOOT_CONFIG_PATH, DEFAULT_BOOT_SYSTEM_CONFIG);
-  const normalized = normalizeBootSystemConfig(raw);
-  writeJsonFile(BOOT_CONFIG_PATH, normalized);
+export function getCoreSystemConfig(): CoreSystemConfig {
+  ensureDir(path.dirname(CORE_CONFIG_PATH));
+  const raw = readJsonFile<any>(CORE_CONFIG_PATH, DEFAULT_CORE_SYSTEM_CONFIG);
+  const normalized = normalizeCoreSystemConfig(raw);
+  writeJsonFile(CORE_CONFIG_PATH, normalized);
   return normalized;
 }
 
-export function updateBootSystemConfig(
-  input: Partial<BootSystemConfig>,
-): BootSystemConfig {
-  const current = getBootSystemConfig();
-  const next = normalizeBootSystemConfig(deepMerge(current, input || {}));
-  writeJsonFile(BOOT_CONFIG_PATH, next);
+export function updateCoreSystemConfig(
+  input: Partial<CoreSystemConfig>,
+): CoreSystemConfig {
+  const current = getCoreSystemConfig();
+  const next = normalizeCoreSystemConfig(deepMerge(current, input || {}));
+  writeJsonFile(CORE_CONFIG_PATH, next);
   return next;
 }
 
@@ -523,17 +435,31 @@ function assertSafePackageName(name: string): string {
   return trimmed;
 }
 
+function npmPrefixOf(target: ManagedTarget): string {
+  if (target === "plugin") return "mioku-plugin-";
+  if (target === "service") return "mioku-service-";
+  return "mioku-adapter-";
+}
+
+function fullPackageName(target: ManagedTarget, name: string): string {
+  const prefix = npmPrefixOf(target);
+  return name.startsWith(prefix) ? name : `${prefix}${name}`;
+}
+
+function isNpmManagedName(name: string): boolean {
+  return (
+    name.startsWith("mioku-plugin-") ||
+    name.startsWith("mioku-service-") ||
+    name.startsWith("mioku-adapter-")
+  );
+}
+
 function resolveManagedDir(target: ManagedTarget, name: string): string {
   const safeName = assertSafePackageName(name);
   const root = path.resolve(getTargetRoot(target));
 
-  // 对于 npm 包，前端传入的是不带前缀的名称如 "boot"，需要还原完整包名
-  let fullName = safeName;
-  if (target === "plugin" && !safeName.startsWith("mioku-plugin-")) {
-    fullName = `mioku-plugin-${safeName}`;
-  } else if (target === "service" && !safeName.startsWith("mioku-service-")) {
-    fullName = `mioku-service-${safeName}`;
-  }
+  // 对于 npm 包，前端传入的是不带前缀的名称如 "chat"，需要还原完整包名
+  const fullName = fullPackageName(target, safeName);
 
   const dir = path.resolve(root, fullName);
   if (!dir.startsWith(`${root}${path.sep}`)) {
@@ -608,7 +534,7 @@ function parseGitHubRepo(
 
   const patterns = [
     /^https?:\/\/github\.com\/([^/]+)\/([^/#?]+?)(?:\.git)?(?:[/?#].*)?$/i,
-    /^git@github\.com:([^/]+)\/([^/#?]+?)(?:\.git)?$/i,
+    /^git@github\.com: [^/]+\/([^/#?]+?)(?:\.git)?$/i,
     /^ssh:\/\/git@github\.com\/([^/]+)\/([^/#?]+?)(?:\.git)?$/i,
   ];
 
@@ -927,6 +853,9 @@ export function listManagedPackages(
   if (target === "service") {
     return listServicesFromNodeModules();
   }
+  if (target === "adapter") {
+    return listAdaptersFromNodeModules();
+  }
   const root = getTargetRoot(target);
   ensureDir(root);
   const names = fs
@@ -1007,6 +936,34 @@ function listServicesFromNodeModules(): Array<Record<string, any>> {
   return services.sort((a, b) => a.name.localeCompare(b.name));
 }
 
+function listAdaptersFromNodeModules(): Array<Record<string, any>> {
+  const adapters: Array<Record<string, any>> = [];
+  const modulesPath = NODE_MODULES_DIR;
+  if (!fs.existsSync(modulesPath)) return adapters;
+
+  const entries = fs.readdirSync(modulesPath, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.name.startsWith("mioku-adapter-")) continue;
+    const fullPath = path.join(modulesPath, entry.name);
+    const stat = fs.lstatSync(fullPath);
+    if (!stat.isDirectory() && !stat.isSymbolicLink()) continue;
+    const name = entry.name.replace(/^mioku-adapter-/, "");
+    const pkg = readPackageJson(fullPath);
+    adapters.push({
+      name,
+      path: fullPath,
+      version: pkg?.version ?? "0.0.0",
+      description: pkg?.description ?? "",
+      hasGit: fs.existsSync(path.join(fullPath, ".git")),
+      isSystemPlugin: false,
+      isSystemService: false,
+      repository: getRepositoryFromPackage(pkg),
+      requiredServices: pkg?.mioku?.services ?? [],
+    });
+  }
+  return adapters.sort((a, b) => a.name.localeCompare(b.name));
+}
+
 export async function installManagedPackage(
   input: InstallRequest,
 ): Promise<Record<string, any>> {
@@ -1046,8 +1003,7 @@ export async function installManagedPackage(
   const installedName =
     afterDeps.find(
       (name) =>
-        !beforeDeps.has(name) &&
-        (name.startsWith("mioku-plugin-") || name.startsWith("mioku-service-")),
+        !beforeDeps.has(name) && isNpmManagedName(name),
     ) || pkgName;
 
   const packageJsonPath = path.join(
@@ -1082,8 +1038,7 @@ export async function checkUpdate(
   name: string,
   target: ManagedTarget,
 ): Promise<Record<string, any>> {
-  const isNpmPackage =
-    name.startsWith("mioku-plugin-") || name.startsWith("mioku-service-");
+  const isNpmPackage = isNpmManagedName(name);
 
   if (isNpmPackage) {
     // 使用 npm view 检查 npm 包更新
@@ -1138,9 +1093,7 @@ export async function updateManagedPackage(
   const installCmd = getInstallCommand();
 
   // 检查是 npm 包还是 git 包
-  const isNpmPackage =
-    input.name.startsWith("mioku-plugin-") ||
-    input.name.startsWith("mioku-service-");
+  const isNpmPackage = isNpmManagedName(input.name);
   const npmPackagePath = path.join(
     process.cwd(),
     "node_modules",
@@ -1214,11 +1167,9 @@ export async function removeManagedPackage(
   }
 
   // construct full package name from short name
-  const fullName = input.name.startsWith("mioku-plugin-") || input.name.startsWith("mioku-service-")
+  const fullName = isNpmManagedName(input.name)
     ? input.name
-    : input.target === "plugin"
-      ? `mioku-plugin-${input.name}`
-      : `mioku-service-${input.name}`;
+    : fullPackageName(input.target, input.name);
 
   const installCmd = getInstallCommand();
   const removeArgs = installCmd.args.map((a) =>
@@ -1316,9 +1267,9 @@ export async function getManagedPackageDetail(
 ): Promise<Record<string, any>> {
   // 插件名称前端传入时没有前缀，服务有前缀
   const isNpmPackage =
-    name.startsWith("mioku-plugin-") ||
-    name.startsWith("mioku-service-") ||
-    (target === "plugin" && /^[a-zA-Z0-9_-]+$/.test(name));
+    isNpmManagedName(name) ||
+    (target === "plugin" && /^[a-zA-Z0-9_-]+$/.test(name)) ||
+    (target === "adapter" && /^[a-zA-Z0-9_-]+$/.test(name));
 
   // NPM 包从 npm registry 获取信息
   if (isNpmPackage || target === "service") {
@@ -1327,6 +1278,8 @@ export async function getManagedPackageDetail(
       fullName = `mioku-plugin-${name}`;
     } else if (target === "service" && !name.startsWith("mioku-service-")) {
       fullName = `mioku-service-${name}`;
+    } else if (target === "adapter" && !name.startsWith("mioku-adapter-")) {
+      fullName = `mioku-adapter-${name}`;
     }
 
     // 从 npm registry 获取包信息
@@ -1790,12 +1743,11 @@ async function notifyOwnerWebUIDownloaded(version: string): Promise<void> {
     return;
   }
 
-  const bots = Array.from(connectedBots.values());
+  const bots = Array.from(connectedBots.values()).filter(Boolean);
   if (bots.length === 0) {
     return;
   }
 
-  const bot = bots[0];
   const settings = getWebUISettings();
   const auth = readJsonFile<{ token?: string }>(AUTH_PATH, {});
   const url = `http://${settings.host}:${settings.port}`;
@@ -1807,13 +1759,26 @@ async function notifyOwnerWebUIDownloaded(version: string): Promise<void> {
   ].join("\n");
 
   for (const ownerId of owners) {
-    try {
-      await bot.api("send_private_msg", {
-        user_id: Number(ownerId),
-        message,
-      });
-    } catch (err: any) {
-      logger.warn(`[webui] 通知主人 ${ownerId} 失败: ${err?.message || err}`);
+    let notified = false;
+    let lastError: unknown;
+    for (const bot of bots) {
+      if (!bot || (typeof bot.online === "boolean" && !bot.online)) {
+        continue;
+      }
+      try {
+        await bot.sendMessage({ type: "private", user_id: ownerId }, message);
+        logger.info(
+          `[webui] 已通过 ${bot.adapter ?? "bot"}/${bot.bot_id ?? "?"} 通知主人 ${ownerId} WebUI 已就绪`,
+        );
+        notified = true;
+        break;
+      } catch (err) {
+        lastError = err;
+      }
+    }
+    if (!notified) {
+      const msg = formatSendError(lastError);
+      logger.warn(`[webui] 通知主人 ${ownerId} 失败: ${msg}`);
     }
   }
 }
@@ -1844,7 +1809,6 @@ export async function notifyOwnersAuthTokenRefreshed(
     return;
   }
 
-  const bot = bots[0];
   const settings = getWebUISettings();
   const url = `http://${settings.host}:${settings.port}`;
   const expireText = new Date(expiresAt).toLocaleString("zh-CN");
@@ -1856,17 +1820,47 @@ export async function notifyOwnersAuthTokenRefreshed(
   ].join("\n");
 
   for (const ownerId of owners) {
-    try {
-      await bot.api("send_private_msg", {
-        user_id: Number(ownerId),
-        message,
-      });
-    } catch (err: any) {
+    let notified = false;
+    let lastError: unknown;
+    for (const bot of bots) {
+      if (!bot || (typeof bot.online === "boolean" && !bot.online)) {
+        continue;
+      }
+      try {
+        await bot.sendMessage(
+          { type: "private", user_id: ownerId },
+          message,
+        );
+        logger.info(
+          `[webui] 已通过 ${bot.adapter ?? "bot"}/${bot.bot_id ?? "?"} 通知主人 ${ownerId} 密钥更新`,
+        );
+        notified = true;
+        break;
+      } catch (err) {
+        lastError = err;
+      }
+    }
+    if (!notified) {
+      const msg = formatSendError(lastError);
       logger.warn(
-        `[webui] 通知主人 ${ownerId} 密钥更新失败: ${err?.message || err}`,
+        `[webui] 通知主人 ${ownerId} 密钥更新失败: ${msg}`,
       );
     }
   }
+}
+
+/** 格式化 sendMessage 抛出的错误，方便排查（icqq 的 ApiRejection 带 code/message）。 */
+function formatSendError(err: unknown): string {
+  if (!err) return "未知错误";
+  if (typeof err === "string") return err;
+  if (err instanceof Error) {
+    const code = (err as { code?: number }).code;
+    if (typeof code === "number" && Number.isFinite(code)) {
+      return `${err.message} (code=${code})`;
+    }
+    return err.message;
+  }
+  return String(err);
 }
 
 export async function updateWebUIDistFromRelease(): Promise<
@@ -2113,7 +2107,7 @@ async function getCpuUsagePercent(): Promise<number> {
   return Number((((totalDelta - idleDelta) / totalDelta) * 100).toFixed(1));
 }
 
-function toHttpBaseUrl(bot: any): string {
+function toHttpBaseUrl(bot: { options?: { protocol?: string; host?: string; port?: number } }): string {
   const protocol = String(bot.options?.protocol || "ws");
   const httpProtocol = protocol === "wss" ? "https" : "http";
   const host = bot.options?.host || "127.0.0.1";
@@ -2148,15 +2142,23 @@ function normalizeVersionSpec(input: string): string {
   return matched?.[0] || cleaned;
 }
 
-async function getBotDetails(bot: any): Promise<Record<string, any>> {
+async function getBotDetails(bot: import("mioku").Bot): Promise<Record<string, any>> {
+  const botAny = bot as unknown as {
+    uin?: number | string;
+    user_id?: number | string;
+    name?: string;
+    options?: { protocol?: string; host?: string; port?: number };
+    app_version?: string;
+  };
+  const qq = String(botAny.uin ?? botAny.user_id ?? bot.bot_id);
   const base = {
-    botId: bot?.bot_id || bot?.uin || 0,
-    qq: bot?.uin || bot?.user_id || 0,
-    nickname: bot?.nickname || bot?.name || "Unknown Bot",
-    avatar: `https://q1.qlogo.cn/g?b=qq&nk=${bot?.uin || bot?.user_id || 0}&s=160`,
-    online: true,
-    napcatVersion: bot?.app_version || "unknown",
-    napcatApiBase: toHttpBaseUrl(bot),
+    botId: bot.bot_id,
+    qq,
+    nickname: bot.nickname || botAny.name || "Unknown Bot",
+    avatar: `https://q1.qlogo.cn/g?b=qq&nk=${qq}&s=160`,
+    online: bot.online,
+    napcatVersion: botAny.app_version || "unknown",
+    napcatApiBase: toHttpBaseUrl(botAny),
     groupCount: 0,
     friendCount: 0,
     onlineDurationMs: 0,
@@ -2165,8 +2167,8 @@ async function getBotDetails(bot: any): Promise<Record<string, any>> {
 
   try {
     const [status, versionInfo, groups, friends] = await Promise.all([
-      bot.api("get_status").catch(() => null),
-      bot.api("get_version_info").catch(() => null),
+      bot.sendApi<{ stat?: { start_time?: number; online?: boolean }; online?: boolean }>("get_status").catch(() => null),
+      bot.sendApi<{ app_version?: string }>("get_version_info").catch(() => null),
       bot.getGroupList().catch(() => []),
       bot.getFriendList().catch(() => []),
     ]);
@@ -2307,6 +2309,24 @@ export function updateChatConfig(fileName: string, data: any): any {
   return data;
 }
 
+export function getAdapterConfigs(adapterName: string): any {
+  const rootPkg = readRootPackageJson();
+  const adapters = rootPkg?.mioku?.adapters ?? {};
+  const safeName = String(adapterName || "").trim().replace(/[^a-zA-Z0-9_-]/g, "");
+  return adapters[safeName] ?? {};
+}
+
+export function updateAdapterConfig(adapterName: string, data: any): any {
+  const safeName = String(adapterName || "").trim().replace(/[^a-zA-Z0-9_-]/g, "");
+  if (!safeName) throw new Error("适配器名称无效");
+  const rootPkg = readRootPackageJson();
+  rootPkg.mioku = rootPkg.mioku ?? {};
+  rootPkg.mioku.adapters = rootPkg.mioku.adapters ?? {};
+  rootPkg.mioku.adapters[safeName] = data ?? {};
+  writeRootPackageJson(rootPkg);
+  return data;
+}
+
 export interface MiokuConfig {
   owners: number[];
   admins: number[];
@@ -2318,7 +2338,7 @@ export interface MiokuConfig {
     token: string;
   }>;
   plugins: string[];
-  boot: BootSystemConfig;
+  core: CoreSystemConfig;
 }
 
 export function getMiokuConfig(): MiokuConfig {
@@ -2333,7 +2353,7 @@ export function getMiokuConfig(): MiokuConfig {
     admins: Array.isArray(miokiConfig.admins) ? miokiConfig.admins : [],
     napcat: Array.isArray(miokiConfig.napcat) ? miokiConfig.napcat : [],
     plugins: Array.isArray(miokiConfig.plugins) ? miokiConfig.plugins : [],
-    boot: getBootSystemConfig(),
+    core: getCoreSystemConfig(),
   };
 }
 
@@ -2344,13 +2364,16 @@ export function updateMiokuConfig(config: Partial<MiokuConfig>): MiokuConfig {
     admins: Array.isArray(config.admins) ? config.admins : current.admins,
     napcat: Array.isArray(config.napcat) ? config.napcat : current.napcat,
     plugins: Array.isArray(config.plugins) ? config.plugins : current.plugins,
-    boot: config.boot ? updateBootSystemConfig(config.boot) : current.boot,
+    core: config.core ? updateCoreSystemConfig(config.core) : current.core,
   };
 
   const localConfig = readJsonFile<any>(LOCAL_CONFIG_PATH, { mioki: {} });
   localConfig.mioki = {
     ...localConfig.mioki,
-    ...updated,
+    owners: updated.owners,
+    admins: updated.admins,
+    napcat: updated.napcat,
+    plugins: updated.plugins,
   };
   writeJsonFile(LOCAL_CONFIG_PATH, localConfig);
 
@@ -2421,9 +2444,6 @@ export function togglePlugin(name: string, enabled: boolean): PluginStatusItem {
   if (enabled) {
     plugins.add(safeName);
   } else {
-    if (safeName.toLowerCase() === "boot") {
-      throw new Error("boot 插件不可关闭");
-    }
     plugins.delete(safeName);
   }
 

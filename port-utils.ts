@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { logger } from "mioki";
+import { logger } from "mioku";
 
 const execFileAsync = promisify(execFile);
 

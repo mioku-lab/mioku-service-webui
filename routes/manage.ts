@@ -27,6 +27,9 @@ export function createManageRoutes() {
   app.get("/services", (c) =>
     c.json({ ok: true, data: listManagedPackages("service") }),
   );
+  app.get("/adapters", (c) =>
+    c.json({ ok: true, data: listManagedPackages("adapter") }),
+  );
   app.get("/plugins/overview", async (c) =>
     c.json({ ok: true, data: await listManagedPackagesWithUpdates("plugin") }),
   );
@@ -43,6 +46,14 @@ export function createManageRoutes() {
     const result = await getManagedPackageDetail(name, "service");
     return c.json(result);
   });
+  app.get("/adapters/overview", async (c) =>
+    c.json({ ok: true, data: await listManagedPackagesWithUpdates("adapter") }),
+  );
+  app.get("/adapters/:name", async (c) => {
+    const name = c.req.param("name");
+    const result = await getManagedPackageDetail(name, "adapter");
+    return c.json(result);
+  });
 
   app.post("/install", async (c) => {
     const body = (await c.req.json()) as InstallRequest;
@@ -53,7 +64,7 @@ export function createManageRoutes() {
   app.post("/check-update", async (c) => {
     const body = (await c.req.json()) as {
       name: string;
-      target: "plugin" | "service";
+      target: "plugin" | "service" | "adapter";
     };
     const result = await checkUpdate(body.name, body.target);
     return c.json(result);
@@ -82,7 +93,7 @@ export function createManageRoutes() {
     const body = (await c.req.json()) as Partial<ChangeRepoRequest>;
     const result = await changeManagedPackageRepo(
       String(body.name || ""),
-      (body.target || "plugin") as "plugin" | "service",
+      (body.target || "plugin") as "plugin" | "service" | "adapter",
       String(body.repoUrl || ""),
     );
     return c.json(result);

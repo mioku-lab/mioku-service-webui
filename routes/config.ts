@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { logger } from "mioki";
+import { logger } from "mioku";
 import {
   getMiokuConfig,
   updateMiokuConfig,
@@ -25,7 +25,7 @@ export function createConfigRoutes() {
       admins: body?.admins?.length,
       napcat: body?.napcat?.length,
       plugins: body?.plugins?.length,
-      bootConfigured: Boolean(body?.boot),
+      coreConfigured: Boolean(body?.core),
     });
     const data = updateMiokuConfig(body);
     return c.json({ ok: true, data });

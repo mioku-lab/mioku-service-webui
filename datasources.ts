@@ -1,4 +1,4 @@
-import { connectedBots, logger } from "mioki";
+import { connectedBots, logger } from "mioku";
 
 export interface DatasourceOption {
   value: string;

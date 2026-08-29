@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { logger } from "mioki";
+import { logger } from "mioku";
 import { getChatConfig, updateChatConfig } from "../system";
 import { listStickerCatalog } from "../database";
 import aiService from "mioku-service-ai";
@@ -332,18 +332,42 @@ export function createAIRoutes() {
       modelId: body?.modelId,
       name: body?.name,
       capabilities: body?.capabilities,
+      thinkingLevel: body?.thinkingLevel,
     });
     return c.json({ ok: true, data: model });
   });
 
+  app.put("/models/:id", async (c) => {
+    const api = getAIApi();
+    if (!api?.setModelThinkingLevel) {
+      return c.json({ ok: false, error: "AI_SERVICE_UNAVAILABLE" }, 503);
+    }
+    const id = decodeURIComponent(c.req.param("id"));
+    const body = await c.req.json();
+    const rawLevel = body?.thinkingLevel;
+    const level =
+      rawLevel === null || rawLevel === undefined || rawLevel === ""
+        ? undefined
+        : String(rawLevel);
+    logger.info(`[webui-action] ai.model.thinking.update`, {
+      id,
+      level: level ?? "(default)",
+    });
+    const ok = api.setModelThinkingLevel(id, level as any);
+    return c.json({ ok });
+  });
+
   app.delete("/models/:id", (c) => {
     const api = getAIApi();
-    if (!api?.removeCustomModel) {
+    if (!api?.removeModel && !api?.removeCustomModel) {
       return c.json({ ok: false, error: "AI_SERVICE_UNAVAILABLE" }, 503);
     }
     const id = decodeURIComponent(c.req.param("id"));
     logger.info(`[webui-action] ai.model.remove`, { id });
-    return c.json({ ok: Boolean(api.removeCustomModel(id)) });
+    const ok = api.removeModel
+      ? Boolean(api.removeModel(id))
+      : Boolean(api.removeCustomModel(id));
+    return c.json({ ok });
   });
 
   app.get("/roles", (c) => {

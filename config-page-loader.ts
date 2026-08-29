@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import matter from "gray-matter";
-import { logger } from "mioki";
+import { logger } from "mioku";
 
 export interface ConfigField {
   key: string;
@@ -42,6 +42,14 @@ export function loadServiceConfigPage(serviceName: string): ConfigPageManifest |
   ];
 
   return loadConfigPage(serviceName, possiblePaths);
+}
+
+export function loadAdapterConfigPage(adapterName: string): ConfigPageManifest | null {
+  const possiblePaths = [
+    path.join(process.cwd(), "node_modules", `mioku-adapter-${adapterName}`),
+  ];
+
+  return loadConfigPage(adapterName, possiblePaths);
 }
 
 function loadConfigPage(

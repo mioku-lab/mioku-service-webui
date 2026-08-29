@@ -1,5 +1,5 @@
 // 管理类型
-export type ManagedTarget = "plugin" | "service";
+export type ManagedTarget = "plugin" | "service" | "adapter";
 
 // 包管理器
 export type PackageManager = "bun";

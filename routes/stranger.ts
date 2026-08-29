@@ -1,5 +1,7 @@
 import { Hono } from "hono";
-import { connectedBots, logger } from "mioki";
+import type { Bot } from "mioku";
+import {connectedBots,
+  logger} from "mioku";
 
 interface StrangerInfoResponse {
   ok: boolean;
@@ -18,7 +20,7 @@ const FETCH_TIMEOUT_MS = 4000;
 const nicknameCache = new Map<string, CacheEntry>();
 const inflight = new Map<string, Promise<string | null>>();
 
-function getConnectedBots(): any[] {
+function getConnectedBots(): Bot[] {
   return Array.from(connectedBots.values()).filter(Boolean);
 }
 
@@ -48,23 +50,20 @@ function setCached(userId: string, nickname: string | null): void {
 }
 
 async function fetchNicknameFromBot(
-  bot: any,
+  bot: Bot,
   userId: string,
 ): Promise<string | null> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
-    const res = await bot.api("get_stranger_info", { user_id: userId });
-    const data = res?.data || res;
-    const nickname = String(data?.nickname ?? "").trim();
+    const info = await bot.getFriendInfo(userId);
+    const nickname = String(info?.nickname ?? "").trim();
     return nickname || null;
-  } catch (error: any) {
+  } catch (error) {
     logger.warn(
-      `stranger-info: bot ${bot?.uin || bot?.bot_id || "?"} 查询 ${userId} 失败: ${error?.message || error}`,
+      `stranger-info: bot ${bot.bot_id} 查询 ${userId} 失败: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
     );
     return null;
-  } finally {
-    clearTimeout(timer);
   }
 }
 
@@ -77,9 +76,7 @@ async function lookupNickname(userId: string): Promise<string | null> {
 
   const promise = (async () => {
     const bots = getConnectedBots();
-    if (bots.length === 0) {
-      return null;
-    }
+    if (bots.length === 0) return null;
     const results = await Promise.all(
       bots.map((bot) => fetchNicknameFromBot(bot, userId)),
     );
@@ -105,7 +102,7 @@ export function createStrangerRoutes() {
   const app = new Hono();
 
   app.post("/info", async (c) => {
-    const body = await c.req.json().catch(() => ({}));
+    const body = (await c.req.json().catch(() => ({}))) as { user_id?: unknown };
     const userId = normalizeUserId(body?.user_id);
     if (!isValidQQNumber(userId)) {
       return c.json(
@@ -129,8 +126,10 @@ export function createStrangerRoutes() {
         ok: true,
         data: { userId, nickname },
       } satisfies StrangerInfoResponse);
-    } catch (error: any) {
-      logger.error(`stranger-info 失败: ${error?.message || error}`);
+    } catch (error) {
+      logger.error(
+        `stranger-info 失败: ${error instanceof Error ? error.message : String(error)}`,
+      );
       return c.json(
         {
           ok: false,

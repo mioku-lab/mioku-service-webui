@@ -1,13 +1,19 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { logger } from "mioki";
+import { logger } from "mioku";
 import { Hono } from "hono";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { createNodeWebSocket } from "@hono/node-ws";
 import type { MiokuService } from "mioku";
 import type { WebUISettings } from "./types";
-import { ensureAuthConfig, loginWithToken, requireAuth } from "./auth";
+import {
+  ensureAuthConfig,
+  loginWithToken,
+  requireAuth,
+  startAuthRefreshTimer,
+  stopAuthRefreshTimer,
+} from "./auth";
 import {
   ensureWebUIDist,
   getWebUISettings,
@@ -23,6 +29,7 @@ import {
   createDBRoutes,
   createPluginConfigRoutes,
   createServiceConfigRoutes,
+  createAdapterConfigRoutes,
   createMemeRoutes,
   createManageRoutes,
   createStoreRoutes,
@@ -118,6 +125,7 @@ class WebUIRuntime {
     this.app.route("/api/db", createDBRoutes());
     this.app.route("/api/plugin-config", createPluginConfigRoutes());
     this.app.route("/api/service-config", createServiceConfigRoutes());
+    this.app.route("/api/adapter-config", createAdapterConfigRoutes());
     this.app.route("/api/meme", createMemeRoutes());
     this.app.route("/api/data-management", createDataManagementRoutes());
     this.app.route("/api/stranger", createStrangerRoutes());
@@ -250,9 +258,13 @@ const webUIService: MiokuService = {
     ensureAuthConfig();
     await ensureWebUIDist();
     await runtime.initRoutes();
+    // 启动密钥定时巡检：即便长时间没有前端访问 / 登录请求，
+    // 也会在密钥接近过期时主动刷新并通知主人。
+    startAuthRefreshTimer();
   },
 
   async dispose() {
+    stopAuthRefreshTimer();
     runtime.stop();
   },
 };

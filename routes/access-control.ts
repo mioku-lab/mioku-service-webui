@@ -1,12 +1,12 @@
 import { Hono } from "hono";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { logger } from "mioki";
+import { logger } from "mioku";
 import { readJsonFile, writeJsonFile, NODE_MODULES_DIR } from "../utils";
 
 const ACCESS_CONFIG_PATH = path.resolve(
   process.cwd(),
-  "config/boot/access-control.json",
+  "config/core/access-control.json",
 );
 
 const DEFAULT_CONFIG = {
