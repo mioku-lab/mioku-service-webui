@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { getActiveCommandManager, logger } from "mioku";
-import { readJsonFile, writeJsonFile, NODE_MODULES_DIR } from "../utils";
+import { isPackageDir, readJsonFile, writeJsonFile, NODE_MODULES_DIR } from "../utils";
 
 const ACCESS_CONFIG_PATH = path.resolve(
   process.cwd(),
@@ -65,15 +65,10 @@ function readAccessCatalog(): AccessItem[] {
   const items: AccessItem[] = [];
 
   for (const entry of entries) {
-    if (!entry.name.startsWith("mioku-plugin-")) continue;
+    if (!entry.name.toLowerCase().startsWith("mioku-plugin-")) continue;
     const fullPath = path.join(NODE_MODULES_DIR, entry.name);
-    let stat: fs.Stats;
-    try {
-      stat = fs.lstatSync(fullPath);
-    } catch {
-      continue;
-    }
-    if (!stat.isDirectory() && !stat.isSymbolicLink()) continue;
+    // Windows 上 pnpm/bun workspace 会用 NTFS junction，旧 lstat 检查会误判
+    if (!isPackageDir(fullPath)) continue;
 
     const pkgPath = path.join(fullPath, "package.json");
     if (!fs.existsSync(pkgPath)) continue;
@@ -84,7 +79,7 @@ function readAccessCatalog(): AccessItem[] {
       continue;
     }
 
-    const name = entry.name.replace(/^mioku-plugin-/, "");
+    const name = entry.name.replace(/^mioku-plugin-/i, "");
     const mioku = pkg.mioku || {};
     const help = mioku.help || { title: name, description: "", commands: [] };
     const hooks: Array<{ id: string; match?: string; event?: string; description?: string }> =

@@ -97,6 +97,11 @@ export function normalizePackageManager(): PackageManager {
   return "bun";
 }
 
+export function isPackageDir(fullPath: string | null | undefined): boolean {
+  if (!fullPath) return false;
+  return fs.existsSync(path.join(fullPath, "package.json"));
+}
+
 export function isValidRepoUrl(url: string): boolean {
   const trimmed = url.trim();
   // 拒绝空白字符：堵 `ssh://host -o ProxyCommand=...` 之类参数注入

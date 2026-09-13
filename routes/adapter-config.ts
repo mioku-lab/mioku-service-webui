@@ -3,23 +3,25 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { loadAdapterConfigPage } from "../config-page-loader";
 import { getAdapterConfigs, updateAdapterConfig } from "../system";
+import { isPackageDir } from "../utils";
 
 function listAdaptersFromNodeModules(): string[] {
   const modulesPath = path.join(process.cwd(), "node_modules");
-  if (!fs.existsSync(modulesPath)) return [];
   const adapters: string[] = [];
-  const entries = fs.readdirSync(modulesPath, { withFileTypes: true });
+  if (!fs.existsSync(modulesPath)) return adapters;
+
+  let entries: import("fs").Dirent[];
+  try {
+    entries = fs.readdirSync(modulesPath, { withFileTypes: true });
+  } catch {
+    return adapters;
+  }
+
   for (const entry of entries) {
-    if (!entry.name.startsWith("mioku-adapter-")) continue;
+    if (!entry.name.toLowerCase().startsWith("mioku-adapter-")) continue;
     const fullPath = path.join(modulesPath, entry.name);
-    let stat: fs.Stats;
-    try {
-      stat = fs.lstatSync(fullPath);
-    } catch {
-      continue;
-    }
-    if (!stat.isDirectory() && !stat.isSymbolicLink()) continue;
-    adapters.push(entry.name.replace(/^mioku-adapter-/, ""));
+    if (!isPackageDir(fullPath)) continue;
+    adapters.push(entry.name.replace(/^mioku-adapter-/i, ""));
   }
   return adapters.sort((a, b) => a.localeCompare(b));
 }

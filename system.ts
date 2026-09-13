@@ -21,6 +21,7 @@ import {
   ensureDir,
   getInstallCommand,
   isNpmPackageName,
+  isPackageDir,
   isValidRepoUrl,
   LOCAL_CONFIG_PATH,
   NODE_MODULES_DIR,
@@ -887,11 +888,11 @@ function listPluginsFromNodeModules(): Array<Record<string, any>> {
 
   const entries = fs.readdirSync(modulesPath, { withFileTypes: true });
   for (const entry of entries) {
-    if (!entry.name.startsWith("mioku-plugin-")) continue;
+    if (!entry.name.toLowerCase().startsWith("mioku-plugin-")) continue;
     const fullPath = path.join(modulesPath, entry.name);
-    const stat = fs.lstatSync(fullPath);
-    if (!stat.isDirectory() && !stat.isSymbolicLink()) continue;
-    const name = entry.name.replace(/^mioku-plugin-/, "");
+    // Windows 上 pnpm/bun workspace 会用 NTFS junction，旧 lstat 检查会误判
+    if (!isPackageDir(fullPath)) continue;
+    const name = entry.name.replace(/^mioku-plugin-/i, "");
     const pkg = readPackageJson(fullPath);
     plugins.push({
       name,
@@ -915,11 +916,11 @@ function listServicesFromNodeModules(): Array<Record<string, any>> {
 
   const entries = fs.readdirSync(modulesPath, { withFileTypes: true });
   for (const entry of entries) {
-    if (!entry.name.startsWith("mioku-service-")) continue;
+    if (!entry.name.toLowerCase().startsWith("mioku-service-")) continue;
     const fullPath = path.join(modulesPath, entry.name);
-    const stat = fs.lstatSync(fullPath);
-    if (!stat.isDirectory() && !stat.isSymbolicLink()) continue;
-    const name = entry.name.replace(/^mioku-service-/, "");
+    // Windows 上 pnpm/bun workspace 会用 NTFS junction，旧 lstat 检查会误判
+    if (!isPackageDir(fullPath)) continue;
+    const name = entry.name.replace(/^mioku-service-/i, "");
     const pkg = readPackageJson(fullPath);
     services.push({
       name,
@@ -943,11 +944,11 @@ function listAdaptersFromNodeModules(): Array<Record<string, any>> {
 
   const entries = fs.readdirSync(modulesPath, { withFileTypes: true });
   for (const entry of entries) {
-    if (!entry.name.startsWith("mioku-adapter-")) continue;
+    if (!entry.name.toLowerCase().startsWith("mioku-adapter-")) continue;
     const fullPath = path.join(modulesPath, entry.name);
-    const stat = fs.lstatSync(fullPath);
-    if (!stat.isDirectory() && !stat.isSymbolicLink()) continue;
-    const name = entry.name.replace(/^mioku-adapter-/, "");
+    // Windows 上 pnpm/bun workspace 会用 NTFS junction，旧 lstat 检查会误判
+    if (!isPackageDir(fullPath)) continue;
+    const name = entry.name.replace(/^mioku-adapter-/i, "");
     const pkg = readPackageJson(fullPath);
     adapters.push({
       name,
@@ -2401,11 +2402,11 @@ export function getAvailablePlugins(): string[] {
   const plugins: string[] = [];
   const entries = fs.readdirSync(modulesPath, { withFileTypes: true });
   for (const entry of entries) {
-    if (!entry.name.startsWith("mioku-plugin-")) continue;
+    if (!entry.name.toLowerCase().startsWith("mioku-plugin-")) continue;
     const fullPath = path.join(modulesPath, entry.name);
-    const stat = fs.lstatSync(fullPath);
-    if (!stat.isDirectory() && !stat.isSymbolicLink()) continue;
-    plugins.push(entry.name.replace(/^mioku-plugin-/, ""));
+    // Windows 上 pnpm/bun workspace 会用 NTFS junction，旧 lstat 检查会误判
+    if (!isPackageDir(fullPath)) continue;
+    plugins.push(entry.name.replace(/^mioku-plugin-/i, ""));
   }
   return plugins.sort((a, b) => a.localeCompare(b));
 }
