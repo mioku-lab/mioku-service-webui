@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { logger } from "mioku";
+import { getActiveCommandManager, logger } from "mioku";
 import { readJsonFile, writeJsonFile, NODE_MODULES_DIR } from "../utils";
 
 const ACCESS_CONFIG_PATH = path.resolve(
@@ -38,10 +38,28 @@ interface AccessItem {
   desc?: string;
   match?: string;
   event?: string;
+  permission?: string;
+  priority?: number;
   fromHook: boolean;
 }
 
 function readAccessCatalog(): AccessItem[] {
+  const manager = getActiveCommandManager();
+  if (manager) {
+    return manager.catalog().map((item) => ({
+      kind: item.kind,
+      plugin: item.plugin,
+      id: item.id,
+      label: item.label,
+      desc: item.desc,
+      match: item.match,
+      event: item.event,
+      permission: item.permission,
+      priority: item.priority,
+      fromHook:
+        item.source === "manifest" && Boolean(item.match || item.event),
+    }));
+  }
   if (!fs.existsSync(NODE_MODULES_DIR)) return [];
   const entries = fs.readdirSync(NODE_MODULES_DIR, { withFileTypes: true });
   const items: AccessItem[] = [];
