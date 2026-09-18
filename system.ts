@@ -4,8 +4,8 @@ import * as path from "node:path";
 import process from "node:process";
 import AdmZip from "adm-zip";
 import systemInfo from "systeminformation";
-import {connectedBots,
-  logger} from "mioku";
+import { buildAdapterReport, connectedBots, logger } from "mioku";
+import type { AdapterInstanceStatus, Bot } from "mioku";
 import type {
   InstallRequest,
   ManagedTarget,
@@ -17,6 +17,7 @@ import type {
 import {
   AUTH_PATH,
   CHAT_CONFIG_DIR,
+  CONFIG_DIR,
   defaultWebUISettings,
   ensureDir,
   getInstallCommand,
@@ -641,6 +642,11 @@ interface ManagedPackageUpdateInfo {
   error?: string;
 }
 
+interface NpmPackageUpdateInfo extends ManagedPackageUpdateInfo {
+  currentVersion: string;
+  latestVersion: string;
+}
+
 interface ManagedPackageUpdateCacheEntry {
   checkedAt: number;
   info: ManagedPackageUpdateInfo;
@@ -728,6 +734,65 @@ function isManagedUpdateCacheFresh(
   return Date.now() - entry.checkedAt < MANAGED_UPDATE_CACHE_TTL_MS;
 }
 
+/** 本地已安装版本：node_modules/<fullName>/package.json */
+function readLocalPackageVersion(fullName: string): string {
+  const pkg = readPackageJson(path.join(NODE_MODULES_DIR, fullName));
+  return pkg?.version || "";
+}
+
+async function getNpmLatestVersion(fullName: string): Promise<string> {
+  try {
+    const data = await fetchJson(
+      `https://registry.npmjs.org/${encodeURIComponent(fullName)}`,
+    );
+    return String(data?.["dist-tags"]?.latest || "").trim();
+  } catch {
+    return "";
+  }
+}
+
+function npmManagedUpdateError(
+  fullName: string,
+  error: string,
+): NpmPackageUpdateInfo {
+  return {
+    state: "unknown",
+    hasUpdates: false,
+    behind: 0,
+    changelog: [],
+    error,
+    currentVersion: readLocalPackageVersion(fullName),
+    latestVersion: "",
+  };
+}
+
+async function checkNpmManagedUpdate(
+  fullName: string,
+): Promise<NpmPackageUpdateInfo> {
+  const current = readLocalPackageVersion(fullName);
+  let latest = "";
+  try {
+    latest = await getNpmLatestVersion(fullName);
+  } catch (error: any) {
+    return npmManagedUpdateError(
+      fullName,
+      error?.message || "UPDATE_CHECK_FAILED",
+    );
+  }
+  if (!latest) {
+    return npmManagedUpdateError(fullName, "无法获取 npm 最新版本");
+  }
+  const hasUpdates = Boolean(current) && current !== latest;
+  return {
+    state: hasUpdates ? "has-updates" : "up-to-date",
+    hasUpdates,
+    behind: hasUpdates ? 1 : 0,
+    changelog: [],
+    currentVersion: current || "0.0.0",
+    latestVersion: latest,
+  };
+}
+
 async function refreshManagedUpdatesInBackground(
   target: ManagedTarget,
   packages: Array<Record<string, any>>,
@@ -736,21 +801,9 @@ async function refreshManagedUpdatesInBackground(
     const name = String(item.name || "");
     if (!name) continue;
 
-    if (!item.hasGit) {
-      setCachedManagedUpdateInfo(target, name, {
-        state: "no-git",
-        hasUpdates: false,
-        behind: 0,
-        changelog: [],
-        error: "NOT_GIT_REPO",
-      });
-      continue;
-    }
-
+    const fullName = fullPackageName(target, name);
     try {
-      const updateInfo = await getManagedPackageUpdateInfo(
-        String(item.path || ""),
-      );
+      const updateInfo = await checkNpmManagedUpdate(fullName);
       setCachedManagedUpdateInfo(target, name, updateInfo);
     } catch (error: any) {
       setCachedManagedUpdateInfo(target, name, {
@@ -770,8 +823,8 @@ function scheduleManagedUpdatesRefresh(
 ): void {
   if (managedOverviewRefreshInFlight.has(target)) return;
 
+  // npm 包与 git 包统一走 registry 更新检查（已不再使用 git 仓库形式）
   const shouldRefresh = packages.some((item) => {
-    if (!item.hasGit) return false;
     const cached = getCachedManagedUpdateInfo(target, String(item.name || ""));
     return !isManagedUpdateCacheFresh(cached);
   });
@@ -1002,10 +1055,8 @@ export async function installManagedPackage(
     ...Object.keys(afterPkg?.devDependencies || {}),
   ];
   const installedName =
-    afterDeps.find(
-      (name) =>
-        !beforeDeps.has(name) && isNpmManagedName(name),
-    ) || pkgName;
+    afterDeps.find((name) => !beforeDeps.has(name) && isNpmManagedName(name)) ||
+    pkgName;
 
   const packageJsonPath = path.join(
     NODE_MODULES_DIR,
@@ -1039,34 +1090,25 @@ export async function checkUpdate(
   name: string,
   target: ManagedTarget,
 ): Promise<Record<string, any>> {
-  const isNpmPackage = isNpmManagedName(name);
+  // 现在插件/服务/适配器全部以 npm 包形式安装，统一走 npm 更新检查
+  const fullName = isNpmManagedName(name)
+    ? name
+    : fullPackageName(target, name);
+  const localPath = path.join(NODE_MODULES_DIR, fullName);
+  const isNpmPackage = fs.existsSync(localPath) || isNpmManagedName(name);
 
   if (isNpmPackage) {
-    // 使用 npm view 检查 npm 包更新
-    const currentVersion = await runCommand(
-      "bun",
-      ["npm", "info", name, "version"],
-      process.cwd(),
-    );
-    const latestVersion = await runCommand(
-      "bun",
-      ["npm", "info", name, "dist-tags.latest"],
-      process.cwd(),
-    );
-    const current = currentVersion.stdout?.trim() || "";
-    const latest = latestVersion.stdout?.trim() || "";
-    const hasUpdates = current !== latest && latest !== "";
-
+    const info = await checkNpmManagedUpdate(fullName);
     return {
       ok: true,
-      state: "npm",
-      hasUpdates,
-      behind: hasUpdates ? 1 : 0,
-      changelog: [],
+      state: info.state,
+      hasUpdates: info.hasUpdates,
+      behind: info.behind,
+      changelog: info.changelog,
       hasGit: false,
-      error: null,
-      currentVersion: current,
-      latestVersion: latest,
+      error: info.error || null,
+      currentVersion: info.currentVersion,
+      latestVersion: info.latestVersion,
     };
   }
 
@@ -1093,28 +1135,30 @@ export async function updateManagedPackage(
 ): Promise<Record<string, any>> {
   const installCmd = getInstallCommand();
 
-  // 检查是 npm 包还是 git 包
-  const isNpmPackage = isNpmManagedName(input.name);
+  // 前端传短名（如 chat），统一还原为完整 npm 包名
+  const fullName = isNpmManagedName(input.name)
+    ? input.name
+    : fullPackageName(input.target, input.name);
   const npmPackagePath = path.join(
     process.cwd(),
     "node_modules",
-    input.name,
+    fullName,
     "package.json",
   );
 
-  if (isNpmPackage && fs.existsSync(npmPackagePath)) {
-    // Bun 包更新
-    const updateArgs = installCmd.args.map((arg) =>
-      arg === "install" ? "update" : arg,
-    );
+  if (fs.existsSync(npmPackagePath)) {
+    // Bun 包更新：bun add 会拉取 npm 最新版本
     const update = await runCommand(
       installCmd.cmd,
-      [...updateArgs, input.name],
+      [...installCmd.args, fullName],
       process.cwd(),
     );
     if (update.code !== 0) {
-      throw new Error(`bun update 失败: ${update.stderr || update.stdout}`);
+      throw new Error(`bun add 更新失败: ${update.stderr || update.stdout}`);
     }
+    managedPackageUpdateCache.delete(
+      makeManagedUpdateCacheKey(input.target, fullName),
+    );
     return {
       ok: true,
       restartRequired: true,
@@ -1173,9 +1217,7 @@ export async function removeManagedPackage(
     : fullPackageName(input.target, input.name);
 
   const installCmd = getInstallCommand();
-  const removeArgs = installCmd.args.map((a) =>
-    a === "add" ? "remove" : a,
-  );
+  const removeArgs = installCmd.args.map((a) => (a === "add" ? "remove" : a));
 
   const result = await runCommand(
     installCmd.cmd,
@@ -1194,10 +1236,15 @@ export async function removeManagedPackage(
       try {
         const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
         const mioki = pkg.mioki ?? {};
-        const plugins: string[] = Array.isArray(mioki.plugins) ? mioki.plugins : [];
+        const plugins: string[] = Array.isArray(mioki.plugins)
+          ? mioki.plugins
+          : [];
         const shortName = fullName.replace(/^mioku-plugin-/, "");
         if (plugins.includes(shortName)) {
-          pkg.mioki = { ...mioki, plugins: plugins.filter((p: string) => p !== shortName) };
+          pkg.mioki = {
+            ...mioki,
+            plugins: plugins.filter((p: string) => p !== shortName),
+          };
           fs.writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
         }
       } catch {
@@ -1225,17 +1272,6 @@ export async function listManagedPackagesWithUpdates(
 
   return packages.map((item) => {
     const name = String(item.name || "");
-
-    if (!item.hasGit) {
-      return {
-        ...item,
-        updateState: "no-git",
-        hasUpdates: false,
-        behind: 0,
-        updateError: "NOT_GIT_REPO",
-        updateChecking: false,
-      };
-    }
 
     const cached = getCachedManagedUpdateInfo(target, name);
     if (cached) {
@@ -1300,6 +1336,9 @@ export async function getManagedPackageDetail(
     } else {
       repositoryUrl = normalizeRepositoryUrl(latest?.repository);
     }
+    // npm 包以包内 repository 字段为准，缺失时回退到 mioku-lab 仓库
+    const packageRepository = normalizeRepositoryUrl(latest?.repository);
+    const finalRepository = packageRepository || repositoryUrl;
 
     // 获取本地已安装版本
     const localPkg =
@@ -1325,7 +1364,7 @@ export async function getManagedPackageDetail(
         hasGit: false,
         isSystemPlugin,
         isSystemService,
-        repository: repositoryUrl,
+        repository: finalRepository,
         originUrl: "",
         homepage: String(latest?.homepage || "").trim(),
         requiredServices: Array.isArray(latest?.mioku?.services)
@@ -1335,7 +1374,7 @@ export async function getManagedPackageDetail(
         help: latest?.mioku?.help || null,
         readme: String(data?.readme || "").trim(),
         readmeFile: "README.md",
-        updateState: "npm",
+        updateState: hasUpdates ? "has-updates" : "up-to-date",
         hasUpdates,
         behind: hasUpdates ? 1 : 0,
         changelog: [],
@@ -1445,19 +1484,24 @@ export async function updateAllManagedPackages(input: {
   const results: Array<Record<string, any>> = [];
 
   for (const item of packages) {
-    const updateInfo = await getManagedPackageUpdateInfo(item.path);
-    if (updateInfo.state === "no-git") {
-      results.push({
-        name: item.name,
-        ok: false,
-        skipped: true,
-        reason: "NOT_GIT_REPO",
-      });
-      continue;
+    const name = String(item.name || "");
+    if (!name) continue;
+
+    // 统一走 npm 更新检查（已不再使用 git 仓库形式）
+    const cached = getCachedManagedUpdateInfo(input.target, name);
+    let updateInfo: ManagedPackageUpdateInfo;
+    if (cached && isManagedUpdateCacheFresh(cached)) {
+      updateInfo = cached.info;
+    } else {
+      updateInfo = await checkNpmManagedUpdate(
+        fullPackageName(input.target, name),
+      );
+      setCachedManagedUpdateInfo(input.target, name, updateInfo);
     }
+
     if (!updateInfo.hasUpdates) {
       results.push({
-        name: item.name,
+        name,
         ok: true,
         skipped: true,
         reason: updateInfo.state === "unknown" ? "CHECK_FAILED" : "UP_TO_DATE",
@@ -1468,19 +1512,19 @@ export async function updateAllManagedPackages(input: {
 
     try {
       const updated = await updateManagedPackage({
-        name: item.name,
+        name,
         target: input.target,
         packageManager: input.packageManager,
       });
       results.push({
-        name: item.name,
+        name,
         ok: true,
         skipped: false,
         ...updated,
       });
     } catch (error: any) {
       results.push({
-        name: item.name,
+        name,
         ok: false,
         skipped: false,
         error: error?.message || "UPDATE_FAILED",
@@ -1828,10 +1872,7 @@ export async function notifyOwnersAuthTokenRefreshed(
         continue;
       }
       try {
-        await bot.sendMessage(
-          { type: "private", user_id: ownerId },
-          message,
-        );
+        await bot.sendMessage({ type: "private", user_id: ownerId }, message);
         logger.info(
           `[webui] 已通过 ${bot.adapter ?? "bot"}/${bot.bot_id ?? "?"} 通知主人 ${ownerId} 密钥更新`,
         );
@@ -1843,9 +1884,7 @@ export async function notifyOwnersAuthTokenRefreshed(
     }
     if (!notified) {
       const msg = formatSendError(lastError);
-      logger.warn(
-        `[webui] 通知主人 ${ownerId} 密钥更新失败: ${msg}`,
-      );
+      logger.warn(`[webui] 通知主人 ${ownerId} 密钥更新失败: ${msg}`);
     }
   }
 }
@@ -2108,14 +2147,6 @@ async function getCpuUsagePercent(): Promise<number> {
   return Number((((totalDelta - idleDelta) / totalDelta) * 100).toFixed(1));
 }
 
-function toHttpBaseUrl(bot: { options?: { protocol?: string; host?: string; port?: number } }): string {
-  const protocol = String(bot.options?.protocol || "ws");
-  const httpProtocol = protocol === "wss" ? "https" : "http";
-  const host = bot.options?.host || "127.0.0.1";
-  const port = bot.options?.port || 3001;
-  return `${httpProtocol}://${host}:${port}`;
-}
-
 async function fetchYiyan(): Promise<{ text: string }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 4500);
@@ -2143,61 +2174,138 @@ function normalizeVersionSpec(input: string): string {
   return matched?.[0] || cleaned;
 }
 
-async function getBotDetails(bot: import("mioku").Bot): Promise<Record<string, any>> {
+/** 读取已安装适配器包的版本（与 help 状态图里 ctx.getAdapter().version 同源） */
+function readAdapterPackageVersion(name: string): string {
+  const pkg = readPackageJson(
+    path.join(NODE_MODULES_DIR, `mioku-adapter-${name}`),
+  );
+  return pkg?.version || "";
+}
+
+/** 与 help 状态图一致:stdin 使用 help/status 配置的随机头像，未配置时用默认随机图接口 */
+function readStdinAvatar(): string {
+  const statusConfig = readJsonFile<any>(
+    path.join(CONFIG_DIR, "help", "status.json"),
+    null,
+  );
+  const configured = String(statusConfig?.stdinAvatar || "").trim();
+  if (configured) return configured;
+  return "https://uapis.cn/api/v1/random/image?category=bq&type=eciyuan";
+}
+
+async function getBotDetails(bot: Bot): Promise<Record<string, any>> {
   const botAny = bot as unknown as {
     uin?: number | string;
     user_id?: number | string;
     name?: string;
-    options?: { protocol?: string; host?: string; port?: number };
-    app_version?: string;
   };
-  const qq = String(botAny.uin ?? botAny.user_id ?? bot.bot_id);
+  const accountId = String(botAny.uin ?? botAny.user_id ?? bot.bot_id);
+  const isStdin = bot.adapter === "stdin";
   const base = {
     botId: bot.bot_id,
-    qq,
+    accountId,
+    qq: accountId,
     nickname: bot.nickname || botAny.name || "Unknown Bot",
-    avatar: `https://q1.qlogo.cn/g?b=qq&nk=${qq}&s=160`,
+    avatar: isStdin
+      ? readStdinAvatar()
+      : `https://q1.qlogo.cn/g?b=qq&nk=${accountId}&s=160`,
     online: bot.online,
-    napcatVersion: botAny.app_version || "unknown",
-    napcatApiBase: toHttpBaseUrl(botAny),
+    adapter: String(bot.adapter),
+    adapterVersion: readAdapterPackageVersion(String(bot.adapter)),
+    implLabel: "",
+    framework: isStdin ? "stdin" : String(bot.adapter),
+    appVersion: "",
+    protocolVersion: "",
+    platform: "",
+    platformVersion: "",
     groupCount: 0,
     friendCount: 0,
+    send: 0,
+    receive: 0,
     onlineDurationMs: 0,
-    statusText: "online",
+    statusText: bot.online ? "online" : "offline",
   };
 
   try {
-    const [status, versionInfo, groups, friends] = await Promise.all([
-      bot.sendApi<{ stat?: { start_time?: number; online?: boolean }; online?: boolean }>("get_status").catch(() => null),
-      bot.sendApi<{ app_version?: string }>("get_version_info").catch(() => null),
-      bot.getGroupList().catch(() => []),
-      bot.getFriendList().catch(() => []),
-    ]);
-
-    const stat = status?.stat || null;
-    const startTs = Number(stat?.start_time || 0);
-    const onlineDurationMs =
-      startTs > 0 ? Math.max(0, Date.now() - startTs) : 0;
-    const onlineFromStatus =
-      typeof status?.online === "boolean" ? status.online : true;
-
-    return {
-      ...base,
-      online: onlineFromStatus,
-      napcatVersion: versionInfo?.app_version || base.napcatVersion,
-      groupCount: Array.isArray(groups) ? groups.length : 0,
-      friendCount: Array.isArray(friends) ? friends.length : 0,
-      onlineDurationMs,
-      statusText: onlineFromStatus ? "online" : "offline",
-    };
-  } catch (error: any) {
-    return {
-      ...base,
-      online: false,
-      statusText: "error",
-      error: error?.message || "NAPCAT_API_ERROR",
-    };
+    if (typeof bot.getAvatar === "function" && !isStdin) {
+      const avatar = await bot.getAvatar().catch(() => null);
+      if (avatar) base.avatar = avatar;
+    }
+  } catch {
+    // keep qlogo fallback
   }
+  return base;
+}
+
+async function getBotOverviewList(): Promise<Record<string, any>[]> {
+  const bots = Array.from(connectedBots.values());
+  if (bots.length === 0) return [];
+  const sorted = [...bots].sort(
+    (a, b) => Number(b.adapter === "stdin") - Number(a.adapter === "stdin"),
+  );
+
+  const adapters = sorted.map((bot) => ({
+    name: String(bot.adapter),
+    version: readAdapterPackageVersion(String(bot.adapter)),
+  }));
+  const report = await buildAdapterReport({ bots: sorted, adapters }).catch(
+    () => null,
+  );
+  const instances = new Map<string, AdapterInstanceStatus>();
+  const implOf = new Map<
+    string,
+    { name: string; version?: string } | undefined
+  >();
+  for (const entry of report?.adapters ?? []) {
+    implOf.set(entry.name, entry.impl);
+    for (const instance of entry.instances) {
+      instances.set(`${entry.name}:${instance.bot_id}`, instance);
+    }
+  }
+
+  return Promise.all(
+    sorted.map(async (bot) => {
+      const detail = await getBotDetails(bot);
+      const uin = String(detail.accountId);
+      const adapterName = String(detail.adapter);
+      const isStdin = adapterName === "stdin";
+      const instance = instances.get(`${adapterName}:${uin}`);
+      const lib = implOf.get(adapterName);
+      const appVersion = instance?.version || lib?.version || "";
+      const implLabel = isStdin
+        ? "stdin"
+        : instance?.impl
+          ? instance.version
+            ? `${instance.impl}/${instance.version}`
+            : String(instance.impl)
+          : lib?.name
+            ? lib.version
+              ? `${lib.name} v${lib.version}`
+              : lib.name
+            : adapterName;
+
+      return {
+        ...detail,
+        implLabel,
+        framework: isStdin ? "stdin" : adapterName,
+        appVersion: isStdin
+          ? String(readAdapterPackageVersion(adapterName))
+          : appVersion,
+        protocolVersion: instance?.protocol ?? "",
+        platform: instance?.platform ?? "",
+        platformVersion: instance?.platformVersion ?? "",
+        online: instance?.online ?? bot.online,
+        groupCount: instance?.stats.groups ?? 0,
+        friendCount: instance?.stats.friends ?? 0,
+        send: instance?.stats.sent ?? 0,
+        receive: instance?.stats.received ?? 0,
+        onlineDurationMs:
+          bot.connected_at != null && bot.online
+            ? Math.max(0, Date.now() - bot.connected_at)
+            : 0,
+      };
+    }),
+  );
 }
 
 export async function getSystemOverview(): Promise<Record<string, any>> {
@@ -2221,9 +2329,10 @@ export async function getSystemOverview(): Promise<Record<string, any>> {
       : 0;
   const siSnapshot = await getSystemInformationSnapshot();
 
-  const botInstances = Array.from(connectedBots.values());
-  const bots = await Promise.all(botInstances.map((bot) => getBotDetails(bot)));
-  const selectedBot = bots[0] || null;
+  const bots = await getBotOverviewList();
+  // 默认展示第一个非 stdin 的 bot（stdin 是终端通道，不是真实账号）
+  const selectedBot =
+    bots.find((bot) => bot.adapter !== "stdin") || bots[0] || null;
 
   return {
     uptimeSeconds: process.uptime(),
@@ -2313,12 +2422,16 @@ export function updateChatConfig(fileName: string, data: any): any {
 export function getAdapterConfigs(adapterName: string): any {
   const rootPkg = readRootPackageJson();
   const adapters = rootPkg?.mioku?.adapters ?? {};
-  const safeName = String(adapterName || "").trim().replace(/[^a-zA-Z0-9_-]/g, "");
+  const safeName = String(adapterName || "")
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]/g, "");
   return adapters[safeName] ?? {};
 }
 
 export function updateAdapterConfig(adapterName: string, data: any): any {
-  const safeName = String(adapterName || "").trim().replace(/[^a-zA-Z0-9_-]/g, "");
+  const safeName = String(adapterName || "")
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]/g, "");
   if (!safeName) throw new Error("适配器名称无效");
   const rootPkg = readRootPackageJson();
   rootPkg.mioku = rootPkg.mioku ?? {};
