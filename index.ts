@@ -26,6 +26,7 @@ import {
   createConfigRoutes,
   createWebUISettingsRoutes,
   createAIRoutes,
+  createAgentRoutes,
   createDBRoutes,
   createPluginConfigRoutes,
   createServiceConfigRoutes,
@@ -120,6 +121,7 @@ class WebUIRuntime {
     this.app.route("/api/config", createConfigRoutes());
     this.app.route("/api/settings", createWebUISettingsRoutes());
     this.app.route("/api/ai", createAIRoutes());
+    this.app.route("/api/agent", createAgentRoutes());
     this.app.route("/api/manage", createManageRoutes());
     this.app.route("/api/store", createStoreRoutes());
     this.app.route("/api/db", createDBRoutes());

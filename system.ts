@@ -16,6 +16,7 @@ import type {
 } from "./types";
 import {
   AUTH_PATH,
+  AGENT_CONFIG_DIR,
   CHAT_CONFIG_DIR,
   CONFIG_DIR,
   defaultWebUISettings,
@@ -2415,6 +2416,17 @@ export function getChatConfig(fileName: string): any {
 
 export function updateChatConfig(fileName: string, data: any): any {
   const filePath = path.join(CHAT_CONFIG_DIR, fileName);
+  writeJsonFile(filePath, data);
+  return data;
+}
+
+export function getAgentConfig(fileName: string): any {
+  const filePath = path.join(AGENT_CONFIG_DIR, fileName);
+  return readJsonFile(filePath, {});
+}
+
+export function updateAgentConfig(fileName: string, data: any): any {
+  const filePath = path.join(AGENT_CONFIG_DIR, fileName);
   writeJsonFile(filePath, data);
   return data;
 }

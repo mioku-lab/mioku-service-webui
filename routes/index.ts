@@ -1,6 +1,7 @@
 export { createConfigRoutes } from "./config";
 export { createWebUISettingsRoutes } from "./webui";
 export { createAIRoutes } from "./ai";
+export { createAgentRoutes } from "./agent";
 export { createDBRoutes, createPluginConfigRoutes, createMemeRoutes, createServiceConfigRoutes } from "./db";
 export { createAdapterConfigRoutes } from "./adapter-config";
 export { createManageRoutes } from "./manage";

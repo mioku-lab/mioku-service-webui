@@ -28,6 +28,7 @@ export const DATA_DIR = getDataDir();
 export const PLUGINS_DIR = path.join(process.cwd(), "plugins");
 export const SERVICES_DIR = path.join(process.cwd(), "node_modules");
 export const CHAT_CONFIG_DIR = path.join(getConfigDir(), "chat");
+export const AGENT_CONFIG_DIR = path.join(getConfigDir(), "agent");
 export const CHAT_DATA_DIR = path.join(getDataDir(), "chat");
 export const LOGS_DIR = path.join(process.cwd(), "logs");
 export const NODE_MODULES_DIR = path.join(process.cwd(), "node_modules");
