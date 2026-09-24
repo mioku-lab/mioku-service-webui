@@ -142,6 +142,7 @@ function sanitizeBaseForSave(body: any): any {
   delete next.workingModel;
   delete next.multimodalWorkingModel;
   delete next.isMultimodal;
+  delete next.mainSupportsVision;
   return next;
 }
 
