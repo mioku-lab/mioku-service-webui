@@ -20,7 +20,6 @@ export const SETTINGS_PATH = path.join(
 );
 export const AUTH_PATH = path.join(getServiceConfigDir("webui"), "auth.json");
 export const ROOT_PACKAGE_PATH = path.join(process.cwd(), "package.json");
-export const LOCAL_CONFIG_PATH = path.join(getConfigDir(), "mioku.json");
 
 export const WEBUI_DIST = path.join(__dirname, "dist");
 export const CONFIG_DIR = getConfigDir();

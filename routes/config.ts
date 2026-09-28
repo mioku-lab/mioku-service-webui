@@ -23,7 +23,7 @@ export function createConfigRoutes() {
     logger.info(`[webui-action] config.mioku.update`, {
       owners: body?.owners?.length,
       admins: body?.admins?.length,
-      napcat: body?.napcat?.length,
+      onebotInstances: body?.onebotInstances?.length,
       plugins: body?.plugins?.length,
       coreConfigured: Boolean(body?.core),
     });

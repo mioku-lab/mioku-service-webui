@@ -25,7 +25,6 @@ import {
   isNpmPackageName,
   isPackageDir,
   isValidRepoUrl,
-  LOCAL_CONFIG_PATH,
   NODE_MODULES_DIR,
   normalizeManagedPackageName,
   PLUGINS_DIR,
@@ -76,20 +75,13 @@ function normalizeRepositoryUrl(repository: any): string {
   return url.replace(/\.git$/, "");
 }
 
-interface NapcatNodeConfig {
-  name?: string;
+export interface OneBotInstanceConfig {
+  protocol?: string;
   host?: string;
   port?: number;
   token?: string;
-  protocol?: string;
-}
-
-interface MiokiRuntimeConfig {
-  mioki?: {
-    napcat?: NapcatNodeConfig[];
-    [key: string]: any;
-  };
-  [key: string]: any;
+  reconnect?: boolean;
+  [key: string]: unknown;
 }
 
 const SYSTEM_PLUGIN_NAMES = new Set(["chat", "help"]);
@@ -299,7 +291,7 @@ function readPackageJson(dir: string): any {
 
 const WEBUI_PLUGIN_PREFIX = "mioku-plugin-";
 
-function appendToMiokiPlugins(cwd: string, pkgName: string): boolean {
+function appendToMiokuPlugins(cwd: string, pkgName: string): boolean {
   if (!pkgName.startsWith(WEBUI_PLUGIN_PREFIX)) return false;
   const shortName = pkgName.slice(WEBUI_PLUGIN_PREFIX.length);
 
@@ -307,12 +299,12 @@ function appendToMiokiPlugins(cwd: string, pkgName: string): boolean {
   if (!fs.existsSync(packageJsonPath)) return false;
 
   const pkg = JSON.parse(fs.readFileSync(packageJsonPath, "utf-8"));
-  const mioki = pkg.mioki ?? {};
-  const plugins = Array.isArray(mioki.plugins) ? [...mioki.plugins] : [];
+  const mioku = pkg.mioku ?? {};
+  const plugins = Array.isArray(mioku.plugins) ? [...mioku.plugins] : [];
   if (plugins.includes(shortName)) return false;
 
   plugins.push(shortName);
-  pkg.mioki = { ...mioki, plugins };
+  pkg.mioku = { ...mioku, plugins };
   fs.writeFileSync(packageJsonPath, `${JSON.stringify(pkg, null, 2)}\n`);
   return true;
 }
@@ -321,21 +313,12 @@ function readRootPackageJson(): any {
   return JSON.parse(fs.readFileSync(ROOT_PACKAGE_PATH, "utf-8"));
 }
 
-function readMiokiPackageJson(): any | null {
-  const candidates = [
-    path.join(process.cwd(), "node_modules", "mioku", "package.json"),
-    path.join(process.cwd(), "..", "node_modules", "mioku", "package.json"),
-  ];
-  for (const candidate of candidates) {
-    if (fs.existsSync(candidate)) {
-      try {
-        return JSON.parse(fs.readFileSync(candidate, "utf-8"));
-      } catch {
-        // ignore
-      }
-    }
+function readRootPackageJsonSafe(): any {
+  try {
+    return readRootPackageJson();
+  } catch {
+    return null;
   }
-  return null;
 }
 
 function readMiokuPackageJson(): any | null {
@@ -1073,7 +1056,7 @@ export async function installManagedPackage(
 
   let enabled = false;
   if (input.target === "plugin") {
-    enabled = appendToMiokiPlugins(installDir, installedName);
+    enabled = appendToMiokuPlugins(installDir, installedName);
   }
 
   return {
@@ -1230,20 +1213,20 @@ export async function removeManagedPackage(
     throw new Error(`bun remove 失败: ${result.stderr || result.stdout}`);
   }
 
-  // clean up mioki.plugins list for plugins
+  // clean up mioku.plugins list for plugins
   if (input.target === "plugin") {
     const pkgPath = ROOT_PACKAGE_PATH;
     if (fs.existsSync(pkgPath)) {
       try {
         const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
-        const mioki = pkg.mioki ?? {};
-        const plugins: string[] = Array.isArray(mioki.plugins)
-          ? mioki.plugins
+        const mioku = pkg.mioku ?? {};
+        const plugins: string[] = Array.isArray(mioku.plugins)
+          ? mioku.plugins
           : [];
         const shortName = fullName.replace(/^mioku-plugin-/, "");
         if (plugins.includes(shortName)) {
-          pkg.mioki = {
-            ...mioki,
+          pkg.mioku = {
+            ...mioku,
             plugins: plugins.filter((p: string) => p !== shortName),
           };
           fs.writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
@@ -2376,15 +2359,6 @@ export async function getSystemOverview(): Promise<Record<string, any>> {
       nodeVersion: process.version,
     },
     versions: {
-      mioki: (() => {
-        const miokiPkg = readMiokiPackageJson();
-        if (miokiPkg?.version) return normalizeVersionSpec(miokiPkg.version);
-        return normalizeVersionSpec(
-          rootPkg?.dependencies?.mioki ||
-            rootPkg?.devDependencies?.mioki ||
-            "unknown",
-        );
-      })(),
       mioku: (() => {
         const miokuPkg = readMiokuPackageJson();
         if (miokuPkg?.version) return normalizeVersionSpec(miokuPkg.version);
@@ -2454,31 +2428,56 @@ export function updateAdapterConfig(adapterName: string, data: any): any {
 }
 
 export interface MiokuConfig {
-  owners: number[];
-  admins: number[];
-  napcat: Array<{
-    name: string;
-    protocol: string;
-    port: number;
-    host: string;
-    token: string;
-  }>;
+  owners: string[];
+  admins: string[];
   plugins: string[];
+  onebotInstances: OneBotInstanceConfig[];
   core: CoreSystemConfig;
 }
 
-export function getMiokuConfig(): MiokuConfig {
-  const localConfig = readJsonFile<any>(LOCAL_CONFIG_PATH, null);
-  const rootPkg = readRootPackageJson();
+function toStringArray(input: unknown): string[] {
+  return Array.isArray(input) ? input.map((v) => String(v)) : [];
+}
 
-  const miokiConfig =
-    localConfig && localConfig.mioki ? localConfig.mioki : rootPkg?.mioki || {};
+function normalizeOneBotInstances(input: unknown): OneBotInstanceConfig[] {
+  if (!Array.isArray(input)) return [];
+  return input
+    .filter((item) => item && typeof item === "object")
+    .map((item: any) => ({
+      ...item,
+      protocol: item.protocol === "wss" ? "wss" : "ws",
+      host: typeof item.host === "string" && item.host ? item.host : "localhost",
+      port:
+        typeof item.port === "number" && Number.isFinite(item.port)
+          ? item.port
+          : 3001,
+      token: typeof item.token === "string" ? item.token : "",
+      reconnect: item.reconnect !== false,
+    }));
+}
+
+function getOneBotInstancesFromPkg(miokuConfig: any): OneBotInstanceConfig[] {
+  const adapters =
+    miokuConfig && typeof miokuConfig === "object" ? miokuConfig.adapters : null;
+  const onebotv11 =
+    adapters && typeof adapters === "object" ? adapters.onebotv11 : null;
+  const instances =
+    onebotv11 && typeof onebotv11 === "object" ? onebotv11.instances : null;
+  return normalizeOneBotInstances(instances);
+}
+
+export function getMiokuConfig(): MiokuConfig {
+  const rootPkg = readRootPackageJsonSafe();
+  const miokuConfig =
+    rootPkg && typeof rootPkg.mioku === "object" && rootPkg.mioku !== null
+      ? rootPkg.mioku
+      : {};
 
   return {
-    owners: Array.isArray(miokiConfig.owners) ? miokiConfig.owners : [],
-    admins: Array.isArray(miokiConfig.admins) ? miokiConfig.admins : [],
-    napcat: Array.isArray(miokiConfig.napcat) ? miokiConfig.napcat : [],
-    plugins: Array.isArray(miokiConfig.plugins) ? miokiConfig.plugins : [],
+    owners: toStringArray(miokuConfig.owners),
+    admins: toStringArray(miokuConfig.admins),
+    plugins: toStringArray(miokuConfig.plugins),
+    onebotInstances: getOneBotInstancesFromPkg(miokuConfig),
     core: getCoreSystemConfig(),
   };
 }
@@ -2486,31 +2485,44 @@ export function getMiokuConfig(): MiokuConfig {
 export function updateMiokuConfig(config: Partial<MiokuConfig>): MiokuConfig {
   const current = getMiokuConfig();
   const updated: MiokuConfig = {
-    owners: Array.isArray(config.owners) ? config.owners : current.owners,
-    admins: Array.isArray(config.admins) ? config.admins : current.admins,
-    napcat: Array.isArray(config.napcat) ? config.napcat : current.napcat,
-    plugins: Array.isArray(config.plugins) ? config.plugins : current.plugins,
+    owners: Array.isArray(config.owners)
+      ? config.owners.map((v) => String(v))
+      : current.owners,
+    admins: Array.isArray(config.admins)
+      ? config.admins.map((v) => String(v))
+      : current.admins,
+    plugins: Array.isArray(config.plugins)
+      ? config.plugins.map((v) => String(v))
+      : current.plugins,
+    onebotInstances: Array.isArray(config.onebotInstances)
+      ? normalizeOneBotInstances(config.onebotInstances)
+      : current.onebotInstances,
     core: config.core ? updateCoreSystemConfig(config.core) : current.core,
   };
 
-  const localConfig = readJsonFile<any>(LOCAL_CONFIG_PATH, { mioki: {} });
-  localConfig.mioki = {
-    ...localConfig.mioki,
-    owners: updated.owners,
-    admins: updated.admins,
-    napcat: updated.napcat,
-    plugins: updated.plugins,
-  };
-  writeJsonFile(LOCAL_CONFIG_PATH, localConfig);
-
   const rootPkg = readRootPackageJson();
-  if (rootPkg.mioki) {
-    rootPkg.mioki.owners = updated.owners;
-    rootPkg.mioki.admins = updated.admins;
-    rootPkg.mioki.napcat = updated.napcat;
-    rootPkg.mioki.plugins = updated.plugins;
-    writeRootPackageJson(rootPkg);
-  }
+  const miokuConfig =
+    typeof rootPkg.mioku === "object" && rootPkg.mioku !== null
+      ? rootPkg.mioku
+      : {};
+
+  miokuConfig.owners = updated.owners;
+  miokuConfig.admins = updated.admins;
+  miokuConfig.plugins = updated.plugins;
+
+  const adapters =
+    typeof miokuConfig.adapters === "object" && miokuConfig.adapters !== null
+      ? miokuConfig.adapters
+      : {};
+  const onebotv11 =
+    typeof adapters.onebotv11 === "object" && adapters.onebotv11 !== null
+      ? adapters.onebotv11
+      : {};
+  adapters.onebotv11 = { ...onebotv11, instances: updated.onebotInstances };
+  miokuConfig.adapters = adapters;
+
+  rootPkg.mioku = miokuConfig;
+  writeRootPackageJson(rootPkg);
 
   return updated;
 }
@@ -2519,9 +2531,9 @@ export function getAvailablePlugins(): string[] {
   const modulesPath = NODE_MODULES_DIR;
   if (!fs.existsSync(modulesPath)) {
     // Fallback to config-based reading
-    const rootPkg = readRootPackageJson();
-    const miokiConfig = rootPkg?.mioki || {};
-    return Array.isArray(miokiConfig.plugins) ? miokiConfig.plugins : [];
+    const rootPkg = readRootPackageJsonSafe();
+    const miokuConfig = rootPkg?.mioku || {};
+    return Array.isArray(miokuConfig.plugins) ? miokuConfig.plugins : [];
   }
 
   const plugins: string[] = [];
