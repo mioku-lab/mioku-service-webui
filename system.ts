@@ -75,15 +75,6 @@ function normalizeRepositoryUrl(repository: any): string {
   return url.replace(/\.git$/, "");
 }
 
-export interface OneBotInstanceConfig {
-  protocol?: string;
-  host?: string;
-  port?: number;
-  token?: string;
-  reconnect?: boolean;
-  [key: string]: unknown;
-}
-
 const SYSTEM_PLUGIN_NAMES = new Set(["chat", "help"]);
 const SYSTEM_SERVICE_NAMES = new Set(["ai", "config", "help", "screenshot"]);
 const CORE_CONFIG_PATH = path.join(
@@ -2431,39 +2422,11 @@ export interface MiokuConfig {
   owners: string[];
   admins: string[];
   plugins: string[];
-  onebotInstances: OneBotInstanceConfig[];
   core: CoreSystemConfig;
 }
 
 function toStringArray(input: unknown): string[] {
   return Array.isArray(input) ? input.map((v) => String(v)) : [];
-}
-
-function normalizeOneBotInstances(input: unknown): OneBotInstanceConfig[] {
-  if (!Array.isArray(input)) return [];
-  return input
-    .filter((item) => item && typeof item === "object")
-    .map((item: any) => ({
-      ...item,
-      protocol: item.protocol === "wss" ? "wss" : "ws",
-      host: typeof item.host === "string" && item.host ? item.host : "localhost",
-      port:
-        typeof item.port === "number" && Number.isFinite(item.port)
-          ? item.port
-          : 3001,
-      token: typeof item.token === "string" ? item.token : "",
-      reconnect: item.reconnect !== false,
-    }));
-}
-
-function getOneBotInstancesFromPkg(miokuConfig: any): OneBotInstanceConfig[] {
-  const adapters =
-    miokuConfig && typeof miokuConfig === "object" ? miokuConfig.adapters : null;
-  const onebotv11 =
-    adapters && typeof adapters === "object" ? adapters.onebotv11 : null;
-  const instances =
-    onebotv11 && typeof onebotv11 === "object" ? onebotv11.instances : null;
-  return normalizeOneBotInstances(instances);
 }
 
 export function getMiokuConfig(): MiokuConfig {
@@ -2477,7 +2440,6 @@ export function getMiokuConfig(): MiokuConfig {
     owners: toStringArray(miokuConfig.owners),
     admins: toStringArray(miokuConfig.admins),
     plugins: toStringArray(miokuConfig.plugins),
-    onebotInstances: getOneBotInstancesFromPkg(miokuConfig),
     core: getCoreSystemConfig(),
   };
 }
@@ -2494,12 +2456,10 @@ export function updateMiokuConfig(config: Partial<MiokuConfig>): MiokuConfig {
     plugins: Array.isArray(config.plugins)
       ? config.plugins.map((v) => String(v))
       : current.plugins,
-    onebotInstances: Array.isArray(config.onebotInstances)
-      ? normalizeOneBotInstances(config.onebotInstances)
-      : current.onebotInstances,
     core: config.core ? updateCoreSystemConfig(config.core) : current.core,
   };
 
+  // 适配器配置(mioku.adapters)由适配器配置页维护,这里不再改写
   const rootPkg = readRootPackageJson();
   const miokuConfig =
     typeof rootPkg.mioku === "object" && rootPkg.mioku !== null
@@ -2509,17 +2469,6 @@ export function updateMiokuConfig(config: Partial<MiokuConfig>): MiokuConfig {
   miokuConfig.owners = updated.owners;
   miokuConfig.admins = updated.admins;
   miokuConfig.plugins = updated.plugins;
-
-  const adapters =
-    typeof miokuConfig.adapters === "object" && miokuConfig.adapters !== null
-      ? miokuConfig.adapters
-      : {};
-  const onebotv11 =
-    typeof adapters.onebotv11 === "object" && adapters.onebotv11 !== null
-      ? adapters.onebotv11
-      : {};
-  adapters.onebotv11 = { ...onebotv11, instances: updated.onebotInstances };
-  miokuConfig.adapters = adapters;
 
   rootPkg.mioku = miokuConfig;
   writeRootPackageJson(rootPkg);
