@@ -3,10 +3,10 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { loadAdapterConfigPage } from "../config-page-loader";
 import { getAdapterConfigs, updateAdapterConfig } from "../system";
-import { isPackageDir } from "../utils";
+import { isPackageDir, projectRoot } from "../utils";
 
 function listAdaptersFromNodeModules(): string[] {
-  const modulesPath = path.join(process.cwd(), "node_modules");
+  const modulesPath = path.join(projectRoot(), "node_modules");
   const adapters: string[] = [];
   if (!fs.existsSync(modulesPath)) return adapters;
 

@@ -3,6 +3,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { PackageManager, WebUISettings } from "./types";
 import {
+  BOT_CWD,
   getServiceConfigDir,
   getServiceDataDir,
   getConfigDir,
@@ -19,7 +20,13 @@ export const SETTINGS_PATH = path.join(
   "settings.json",
 );
 export const AUTH_PATH = path.join(getServiceConfigDir("webui"), "auth.json");
-export const ROOT_PACKAGE_PATH = path.join(process.cwd(), "package.json");
+
+/** 机器人根目录：进程 cwd 可能与 start({ cwd }) 不一致，以框架记录为准 */
+export function projectRoot(): string {
+  return BOT_CWD.value || process.cwd();
+}
+
+export const ROOT_PACKAGE_PATH = path.join(projectRoot(), "package.json");
 
 export const WEBUI_DIST = path.join(__dirname, "dist");
 export const CONFIG_DIR = getConfigDir();

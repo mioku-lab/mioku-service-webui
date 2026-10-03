@@ -1,7 +1,9 @@
+import { createRequire } from "node:module";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import matter from "gray-matter";
-import { logger } from "mioku";
+import { BOT_CWD, logger } from "mioku";
+import { projectRoot } from "./utils";
 
 export interface ConfigField {
   key: string;
@@ -27,39 +29,63 @@ export interface ConfigPageManifest {
 }
 
 export function loadPluginConfigPage(pluginName: string): ConfigPageManifest | null {
-  const possiblePaths = [
-    path.join(process.cwd(), "plugins", pluginName),
-    path.join(process.cwd(), "node_modules", `mioku-plugin-${pluginName}`),
-  ];
-
-  return loadConfigPage(pluginName, possiblePaths);
+  const root = projectRoot();
+  return loadConfigPage(pluginName, `mioku-plugin-${pluginName}`, [
+    path.join(root, "plugins", pluginName),
+    path.join(root, "node_modules", `mioku-plugin-${pluginName}`),
+  ]);
 }
 
 export function loadServiceConfigPage(serviceName: string): ConfigPageManifest | null {
-  const possiblePaths = [
-    path.join(process.cwd(), "services", serviceName),
-    path.join(process.cwd(), "node_modules", `mioku-service-${serviceName}`),
-  ];
-
-  return loadConfigPage(serviceName, possiblePaths);
+  const root = projectRoot();
+  return loadConfigPage(serviceName, `mioku-service-${serviceName}`, [
+    path.join(root, "services", serviceName),
+    path.join(root, "node_modules", `mioku-service-${serviceName}`),
+  ]);
 }
 
 export function loadAdapterConfigPage(adapterName: string): ConfigPageManifest | null {
-  const possiblePaths = [
-    path.join(process.cwd(), "node_modules", `mioku-adapter-${adapterName}`),
-  ];
+  return loadConfigPage(adapterName, `mioku-adapter-${adapterName}`, [
+    path.join(projectRoot(), "node_modules", `mioku-adapter-${adapterName}`),
+  ]);
+}
 
-  return loadConfigPage(adapterName, possiblePaths);
+/** 从机器人根目录按 node_modules 依赖解析包真实目录（pnpm / 提升安装等布局） */
+function resolvePackageDir(root: string, packageName: string): string | null {
+  const require = createRequire(path.join(root, "package.json"));
+  try {
+    return path.dirname(require.resolve(`${packageName}/package.json`));
+  } catch {
+    // exports 未暴露 package.json 时，从入口文件向上找
+  }
+  try {
+    let dir = path.dirname(require.resolve(packageName));
+    for (let i = 0; i < 5; i++) {
+      if (fs.existsSync(path.join(dir, "package.json"))) return dir;
+      const parent = path.dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+  } catch {
+    // 未安装该依赖
+  }
+  return null;
 }
 
 function loadConfigPage(
   packageName: string,
+  npmName: string,
   possiblePaths: string[],
 ): ConfigPageManifest | null {
+  const resolved = resolvePackageDir(projectRoot(), npmName);
+  const candidates =
+    resolved && !possiblePaths.includes(resolved)
+      ? [...possiblePaths, resolved]
+      : possiblePaths;
   let configMdPath: string | null = null;
   let packageDir: string | null = null;
 
-  for (const dir of possiblePaths) {
+  for (const dir of candidates) {
     const candidate = path.join(dir, "config.md");
     if (fs.existsSync(candidate)) {
       configMdPath = candidate;
