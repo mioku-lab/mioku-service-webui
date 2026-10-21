@@ -333,6 +333,22 @@ function writeRootPackageJson(data: any): void {
   fs.writeFileSync(ROOT_PACKAGE_PATH, JSON.stringify(data, null, 2), "utf-8");
 }
 
+function resolveWebUIHost(configured: unknown): string {
+  const fromEnv = process.env.MIOKU_WEBUI_HOST?.trim();
+  if (fromEnv) return fromEnv;
+  return typeof configured === "string" && configured.trim()
+    ? configured.trim()
+    : defaultWebUISettings.host;
+}
+
+function resolveWebUIPort(configured: unknown): number {
+  const fromEnv = Number(process.env.MIOKU_WEBUI_PORT);
+  if (Number.isFinite(fromEnv) && fromEnv > 0) return fromEnv;
+  return typeof configured === "number" && Number.isFinite(configured)
+    ? configured
+    : defaultWebUISettings.port;
+}
+
 export function getWebUISettings(): WebUISettings {
   ensureDir(path.dirname(SETTINGS_PATH));
   const settings = readJsonFile<Record<string, unknown>>(
@@ -340,14 +356,8 @@ export function getWebUISettings(): WebUISettings {
     defaultWebUISettings as unknown as Record<string, unknown>,
   );
   const merged: WebUISettings = {
-    port:
-      typeof settings.port === "number" && Number.isFinite(settings.port)
-        ? settings.port
-        : defaultWebUISettings.port,
-    host:
-      typeof settings.host === "string" && settings.host.trim()
-        ? settings.host
-        : defaultWebUISettings.host,
+    port: resolveWebUIPort(settings.port),
+    host: resolveWebUIHost(settings.host),
     packageManager: "bun",
   };
   writeJsonFile(SETTINGS_PATH, merged);
@@ -369,6 +379,11 @@ export function updateWebUISettings(
         : current.host,
     packageManager: "bun",
   };
+  if (process.env.MIOKU_WEBUI_HOST?.trim() && input.host !== undefined) {
+    logger.warn(
+      `[webui] 监听地址由环境变量 MIOKU_WEBUI_HOST=${process.env.MIOKU_WEBUI_HOST} 决定，配置里的 ${next.host} 不会生效`,
+    );
+  }
   writeJsonFile(SETTINGS_PATH, next);
   return next;
 }
