@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { logger } from "mioku";
 import { getAgentConfig, updateAgentConfig } from "../system";
+import { createAgentSkillRoutes } from "./agent-skills";
 import aiService from "mioku-service-ai";
 
 const PERMISSION_LEVELS = new Set([
@@ -51,6 +52,10 @@ function sanitizeSettingsForSave(body: any): any {
     const num = Math.floor(Number(value));
     return Number.isFinite(num) && num > 0 ? num : fallback;
   };
+  const nonNegative = (value: unknown, fallback: number) => {
+    const num = Math.floor(Number(value));
+    return Number.isFinite(num) && num >= 0 ? num : fallback;
+  };
   delete next.temperature;
   delete next.enableMediaRecognition;
   next.maxIterations = positive(next.maxIterations, 500);
@@ -79,6 +84,19 @@ function sanitizeSettingsForSave(body: any): any {
     timeoutMs: positive(next.bash?.timeoutMs, 120000),
     approvalTimeoutMs: positive(next.bash?.approvalTimeoutMs, 300000),
   };
+  next.skills = {
+    enabled: next.skills?.enabled !== false,
+    extraRoots: Array.isArray(next.skills?.extraRoots)
+      ? next.skills.extraRoots
+          .map((item: unknown) => String(item ?? "").trim())
+          .filter(Boolean)
+      : [],
+    maxInPrompt: positive(next.skills?.maxInPrompt, 50),
+    descriptionMaxLength: positive(next.skills?.descriptionMaxLength, 500),
+    activationTtlMs: positive(next.skills?.activationTtlMs, 3_600_000),
+    rescanIntervalMs: nonNegative(next.skills?.rescanIntervalMs, 2000),
+    maxResourceFiles: positive(next.skills?.maxResourceFiles, 200),
+  };
   next.dataCollection = { enabled: next.dataCollection?.enabled !== false };
   next.debug = Boolean(next.debug);
   return next;
@@ -90,6 +108,8 @@ function getAIApi() {
 
 export function createAgentRoutes() {
   const app = new Hono();
+
+  app.route("/skills", createAgentSkillRoutes());
 
   app.get("/base", (c) =>
     c.json({ ok: true, data: getAgentConfig("base.json") }),
