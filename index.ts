@@ -37,6 +37,7 @@ import {
   createDataManagementRoutes,
   createStrangerRoutes,
   createAccessControlRoutes,
+  createMcpRoutes,
 } from "./routes";
 import { freePort } from "./port-utils";
 
@@ -132,6 +133,7 @@ class WebUIRuntime {
     this.app.route("/api/data-management", createDataManagementRoutes());
     this.app.route("/api/stranger", createStrangerRoutes());
     this.app.route("/api/access-control", createAccessControlRoutes());
+    this.app.route("/api/mcp", createMcpRoutes());
 
     this.app.get(
       "/api/ws/logs",

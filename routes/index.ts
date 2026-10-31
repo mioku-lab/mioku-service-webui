@@ -9,3 +9,4 @@ export { createStoreRoutes } from "./store";
 export { createDataManagementRoutes } from "./data-management";
 export { createStrangerRoutes } from "./stranger";
 export { createAccessControlRoutes } from "./access-control";
+export { createMcpRoutes } from "./mcp";

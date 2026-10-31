@@ -98,6 +98,10 @@ function sanitizeSettingsForSave(body: any): any {
     maxResourceFiles: positive(next.skills?.maxResourceFiles, 200),
   };
   next.dataCollection = { enabled: next.dataCollection?.enabled !== false };
+  next.mcp = {
+    enabled: next.mcp?.enabled !== false,
+    maxTools: nonNegative(next.mcp?.maxTools, 48),
+  };
   next.debug = Boolean(next.debug);
   return next;
 }
